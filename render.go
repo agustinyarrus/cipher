@@ -12,6 +12,7 @@ package main
 
 import (
 	"bytes"
+	"sort"
 	"strings"
 	"sync"
 
@@ -24,10 +25,71 @@ import (
 // truncamos y avisamos. Los archivos de código real rara vez se acercan a esto.
 const maxRenderBytes = 12 << 20 // 12 MiB
 
-// CodeGlob: filtro (curado) para el diálogo nativo "Abrir". chroma resalta cualquier texto, así que
-// el grupo por defecto es "Todos los archivos"; este es un atajo a las extensiones más comunes + las
-// decompilables (.class).
-const CodeGlob = "*.go;*.c;*.h;*.cpp;*.cc;*.cxx;*.hpp;*.cs;*.java;*.class;*.kt;*.kts;*.scala;*.groovy;*.py;*.pyw;*.rb;*.rs;*.swift;*.js;*.mjs;*.cjs;*.jsx;*.ts;*.tsx;*.json;*.jsonc;*.html;*.htm;*.css;*.scss;*.sass;*.less;*.php;*.lua;*.pl;*.pm;*.sh;*.bash;*.zsh;*.fish;*.ps1;*.psm1;*.bat;*.cmd;*.sql;*.r;*.dart;*.m;*.mm;*.vb;*.fs;*.f90;*.jl;*.hs;*.ml;*.clj;*.cljs;*.ex;*.exs;*.erl;*.vue;*.svelte;*.astro;*.toml;*.yaml;*.yml;*.xml;*.ini;*.cfg;*.conf;*.md;*.rst;*.txt;*.log;*.asm;*.s;*.proto;*.graphql;*.tf;Dockerfile;Makefile;CMakeLists.txt"
+// extrasExts: extensiones útiles que chroma no lista como tales pero que igual queremos abrir
+// (decompilables + texto suelto).
+var extrasExts = []string{".class", ".txt", ".log", ".text", ".env", ".gitignore", ".gitattributes"}
+
+// validExt acepta sólo extensiones ASCII "sanas" (.go, .c++, .6pl) y descarta rarezas que romperían
+// el registro de Windows (emoji como el .🔥 de Mojo, .µcad, etc.).
+func validExt(e string) bool {
+	if len(e) < 2 || e[0] != '.' {
+		return false
+	}
+	for _, r := range e[1:] {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '+', r == '#', r == '_', r == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// AllExtensions devuelve, ordenadas y sin repetir, TODAS las extensiones que chroma reconoce
+// (de los Filenames/AliasFilenames de cada lexer) más las extras. La fuente única de verdad para el
+// filtro del diálogo y para el registro de "Abrir con": así Cipher cubre los 250+ lenguajes de chroma.
+func AllExtensions() []string {
+	set := map[string]bool{}
+	add := func(globs []string) {
+		for _, g := range globs {
+			if !strings.HasPrefix(g, "*.") { // sólo patrones de extensión (no "Dockerfile", "Makefile", …)
+				continue
+			}
+			ext := strings.ToLower(g[strings.LastIndex(g, "."):]) // última extensión: "*.html.erb" -> ".erb"
+			if validExt(ext) {
+				set[ext] = true
+			}
+		}
+	}
+	for _, name := range lexers.Names(false) {
+		l := lexers.Get(name)
+		if l == nil {
+			continue
+		}
+		cfg := l.Config()
+		add(cfg.Filenames)
+		add(cfg.AliasFilenames)
+	}
+	for _, e := range extrasExts {
+		set[e] = true
+	}
+	out := make([]string, 0, len(set))
+	for e := range set {
+		out = append(out, e)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// CodeGlob arma el patrón "*.ext;*.ext;…" (todas las extensiones de chroma) para el diálogo "Abrir".
+func CodeGlob() string {
+	exts := AllExtensions()
+	parts := make([]string, len(exts))
+	for i, e := range exts {
+		parts[i] = "*" + e
+	}
+	return strings.Join(parts, ";")
+}
 
 // RenderResult: HTML resaltado + metadatos para la barra de estado del cliente.
 type RenderResult struct {

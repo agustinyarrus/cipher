@@ -134,7 +134,7 @@ func pickCode(owner uintptr) string {
 
 	specs := []comdlgFilterSpec{
 		{utf16Ptr("Todos los archivos"), utf16Ptr("*.*")},
-		{utf16Ptr("Código"), utf16Ptr(CodeGlob)},
+		{utf16Ptr("Código"), utf16Ptr(CodeGlob())},
 	}
 	comCall(dlg, mSetFileTypes, uintptr(len(specs)), uintptr(unsafe.Pointer(&specs[0])))
 	comCall(dlg, mSetTitle, utf16Ptr("Abrir archivo"))

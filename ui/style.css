@@ -32,7 +32,7 @@ html,body{
   height:100%; width:100%; overflow:hidden;
   background:var(--bg); color:var(--fg);
   font-family:"Cascadia Code","Cascadia Mono",ui-monospace,"Segoe UI",sans-serif;
-  font-weight:300; font-size:13px;
+  font-weight:200; font-size:13px;
   -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
   -webkit-user-select:none; user-select:none; cursor:default;
 }
@@ -143,10 +143,11 @@ body.wrap #code{ width:auto; }
 body.no-doc #code{ display:none; }
 
 #code .chroma{ display:block; background:transparent !important;
-  font-family:"Cascadia Code","Cascadia Mono",ui-monospace,monospace;
+  font-family:"Cascadia Code","Cascadia Mono",ui-monospace,monospace; font-weight:200;
   font-size:calc(13px * var(--rscale)); line-height:1.62;
   -webkit-user-select:text; user-select:text; }
-#code .chroma code{ display:block; }
+/* el <code> del navegador trae font-family:monospace (UA) y pisaria la Cascadia de .chroma -> inherit */
+#code .chroma code{ display:block; font-family:inherit; }
 
 /* cada línea = fila flex: gutter de número (sticky) + código */
 .chroma .line{ display:flex; align-items:flex-start; min-width:100%; }
