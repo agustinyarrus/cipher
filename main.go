@@ -534,6 +534,13 @@ func main() {
 		dumpRender(os.Args[2])
 		return
 	}
+	// modo --exts [archivo]: vuelca todas las extensiones que chroma reconoce (";"-separadas) para que
+	// install.ps1 registre Cipher en "Abrir con" de cada una. Con archivo escribe ahí (sirve aun en el
+	// build GUI sin consola); sin archivo, a stdout (build con consola).
+	if len(os.Args) > 1 && os.Args[1] == "--exts" {
+		dumpExts(os.Args)
+		return
+	}
 
 	initialPath := ""
 	if len(os.Args) > 1 && strings.TrimSpace(os.Args[1]) != "" {
@@ -1036,4 +1043,17 @@ func dumpRender(path string) {
 	}
 	fmt.Println("----- HTML (primeros 3000) -----")
 	fmt.Println(h)
+}
+
+// dumpExts (modo --exts [archivo]): imprime/escribe las extensiones que chroma reconoce, separadas
+// por ";". install.ps1 lo usa para registrar Cipher en "Abrir con" de todos esos tipos.
+func dumpExts(args []string) {
+	exts := AllExtensions()
+	out := strings.Join(exts, ";")
+	if len(args) > 2 && strings.TrimSpace(args[2]) != "" {
+		os.WriteFile(args[2], []byte(out), 0o644)
+		return
+	}
+	fmt.Println(out)
+	fmt.Fprintf(os.Stderr, "(%d extensiones)\n", len(exts))
 }

@@ -35,13 +35,25 @@ $startLnk   = Join-Path ([Environment]::GetFolderPath('CommonStartMenu')) 'Progr
 $uninstKey  = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Cipher'
 $appPaths   = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\App Paths\cipher.exe'
 
-# extensiones que Cipher ofrece abrir (sólo "Abrir con"; .class se decompila)
-$exts = '.go','.c','.h','.cpp','.cc','.cxx','.hpp','.cs','.java','.class','.kt','.kts','.scala',
-        '.groovy','.py','.pyw','.rb','.rs','.swift','.js','.mjs','.cjs','.jsx','.ts','.tsx','.json',
-        '.jsonc','.html','.htm','.css','.scss','.sass','.less','.php','.lua','.pl','.pm','.sh',
-        '.bash','.zsh','.fish','.ps1','.psm1','.bat','.cmd','.sql','.r','.dart','.m','.mm','.vb',
-        '.fs','.f90','.jl','.hs','.ml','.clj','.cljs','.ex','.exs','.erl','.vue','.svelte','.astro',
-        '.toml','.yaml','.yml','.xml','.ini','.cfg','.conf','.rst','.asm','.s','.proto','.graphql','.tf'
+# extensiones que Cipher ofrece en "Abrir con": TODAS las que reconoce chroma (250+ lenguajes). Se
+# las pedimos al propio exe (cipher.exe --exts <archivo>) para no hardcodear ~500 y quedar en sync.
+$exts = @()
+$srcExe = Join-Path $here 'cipher.exe'
+if (Test-Path $srcExe) {
+  try {
+    $tmpExts = Join-Path $env:TEMP 'cipher-exts.txt'
+    Start-Process -FilePath $srcExe -ArgumentList '--exts', "`"$tmpExts`"" -WindowStyle Hidden -Wait
+    if (Test-Path $tmpExts) {
+      $exts = ((Get-Content -Raw $tmpExts) -split ';') | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+      Remove-Item $tmpExts -Force -ErrorAction SilentlyContinue
+    }
+  } catch {}
+}
+if (-not $exts -or $exts.Count -lt 10) { # fallback si el exe no respondió
+  $exts = '.go','.c','.h','.cpp','.cs','.java','.class','.kt','.py','.rb','.rs','.swift','.js','.ts',
+          '.jsx','.tsx','.json','.html','.css','.php','.lua','.pl','.sh','.ps1','.bat','.sql','.r',
+          '.dart','.vb','.toml','.yaml','.yml','.xml','.ini','.md','.rst','.txt','.asm','.proto','.tf'
+}
 
 function Remove-Key($p) { if (Test-Path $p) { Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue } }
 
