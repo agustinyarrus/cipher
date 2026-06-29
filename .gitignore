@@ -1,0 +1,13 @@
+# binarios compilados — regenerar con .\build.ps1
+cipher.exe
+cipher-debug.exe
+
+# recurso de icono generado desde cipher.ico — lo crea build.ps1
+rsrc.syso
+
+# temporales
+*.log
+*.tmp
+
+# instaladores compilados (van al Release)
+dist/
