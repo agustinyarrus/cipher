@@ -29,7 +29,7 @@
 html,body{
   height:100%; width:100%; overflow:hidden;
   background:var(--bg); color:var(--fg);
-  font-family:"Cascadia Code","Cascadia Mono",ui-monospace,"Segoe UI",sans-serif;
+  font-family:"Cascadia Code ExtraLight","Cascadia Code","Cascadia Mono",ui-monospace,"Segoe UI",sans-serif;
   font-weight:200; font-size:13px;
   -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
   -webkit-user-select:none; user-select:none; cursor:default;
@@ -141,7 +141,7 @@ body.wrap #code{ width:auto; }
 body.no-doc #code{ display:none; }
 
 #code .chroma{ display:block; background:transparent !important;
-  font-family:"Cascadia Code","Cascadia Mono",ui-monospace,monospace; font-weight:200;
+  font-family:"Cascadia Code ExtraLight","Cascadia Code","Cascadia Mono",ui-monospace,monospace; font-weight:200;
   font-size:calc(13px * var(--rscale)); line-height:1.62;
   -webkit-user-select:text; user-select:text; }
 /* el <code> del navegador trae font-family:monospace (UA) y pisaria la Cascadia de .chroma -> inherit */
@@ -163,7 +163,7 @@ body.wrap .chroma .cl{ flex:1 1 auto; min-width:0;
 /* fallback plano (sin lexer) y mensajes (decompilación fallida) */
 #code pre.cipher-plain,#code pre.cipher-msg{ margin:0; padding:14px 20px;
   white-space:pre-wrap; overflow-wrap:anywhere;
-  font-family:"Cascadia Code","Cascadia Mono",monospace; font-size:calc(13px * var(--rscale));
+  font-family:"Cascadia Code ExtraLight","Cascadia Code","Cascadia Mono",monospace; font-size:calc(13px * var(--rscale));
   line-height:1.62; color:var(--fg); -webkit-user-select:text; user-select:text; }
 #code pre.cipher-msg{ color:var(--warn); }
 
