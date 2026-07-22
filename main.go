@@ -430,8 +430,8 @@ func drawSplashMark(hdc uintptr, rc rect) {
 	if w < 2 {
 		w = 2
 	}
-	faint, _, _ := pCreatePen.Call(psSolid, uintptr(w), 0x005E4E47)  // #474E5E
-	accent, _, _ := pCreatePen.Call(psSolid, uintptr(w), 0x00F7A27A) // #7AA2F7
+	faint, _, _ := pCreatePen.Call(psSolid, uintptr(w), 0x004D4D4D)  // #4D4D4D
+	accent, _, _ := pCreatePen.Call(psSolid, uintptr(w), 0x00FFFFFF) // #FFFFFF
 	defer pDeleteObject.Call(faint)
 	defer pDeleteObject.Call(accent)
 	poly := func(pen uintptr, pts []point) {
@@ -564,7 +564,7 @@ func main() {
 
 	// dark + callback listos ANTES del hook: el CBT hook subclasa la ventana al nacer, para que sea
 	// frameless + oscura (con la marca) desde el primer pixel, sin flash de barra nativa / fondo claro.
-	darkBrush, _, _ = pCreateSolidBrush.Call(0x000C0908) // COLORREF de #08090C (fondo Nocturne)
+	darkBrush, _, _ = pCreateSolidBrush.Call(0x00000000) // COLORREF de #000000 (fondo Onyx)
 	subclassCB = windows.NewCallback(subclassProc)
 
 	tid, _, _ := pGetCurrentThreadId.Call()
