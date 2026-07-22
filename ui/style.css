@@ -141,8 +141,10 @@ body.wrap #code{ width:auto; }
 body.no-doc #code{ display:none; }
 
 #code .chroma{ display:block; background:transparent !important;
-  font-family:"Cascadia Code ExtraLight","Cascadia Code","Cascadia Mono",ui-monospace,monospace; font-weight:200;
-  font-size:calc(13px * var(--rscale)); line-height:1.4;
+  font-family:"Cascadia Code Light","Cascadia Code","Cascadia Mono",ui-monospace,monospace; font-weight:300;
+  /* Look "Notepad++": em de 16px FISICOS a 150% DPI (10.6667px logicos) con el corte Light y
+     lineas de 20px fisicos exactos (1.25). Mas chico + denso + definido; el cromo queda ExtraLight. */
+  font-size:calc(10.6667px * var(--rscale)); line-height:1.25;
   -webkit-user-select:text; user-select:text; }
 /* el <code> del navegador trae font-family:monospace (UA) y pisaria la Cascadia de .chroma -> inherit */
 #code .chroma code{ display:block; font-family:inherit; }
@@ -163,8 +165,8 @@ body.wrap .chroma .cl{ flex:1 1 auto; min-width:0;
 /* fallback plano (sin lexer) y mensajes (decompilación fallida) */
 #code pre.cipher-plain,#code pre.cipher-msg{ margin:0; padding:14px 20px;
   white-space:pre-wrap; overflow-wrap:anywhere;
-  font-family:"Cascadia Code ExtraLight","Cascadia Code","Cascadia Mono",monospace; font-size:calc(13px * var(--rscale));
-  line-height:1.4; color:var(--fg); -webkit-user-select:text; user-select:text; }
+  font-family:"Cascadia Code Light","Cascadia Code","Cascadia Mono",monospace; font-weight:300; font-size:calc(10.6667px * var(--rscale));
+  line-height:1.25; color:var(--fg); -webkit-user-select:text; user-select:text; }
 #code pre.cipher-msg{ color:var(--warn); }
 
 /* aviso central (archivo binario / vacío) */
