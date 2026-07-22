@@ -65,6 +65,7 @@ Start-Sleep -Milliseconds 300
 if ($Uninstall) {
   foreach ($e in $exts) {
     Remove-ItemProperty "$cls\$e\OpenWithProgids" -Name $progId -ErrorAction SilentlyContinue
+    Remove-Key "$cls\SystemFileAssociations\$e\shell\cipher.edit"
   }
   Remove-Key "$cls\$progId"
   Remove-Key $appsKey
@@ -110,6 +111,17 @@ foreach ($e in $exts) {
   Set-ItemProperty $owp $progId ''
 }
 
+# 4b) verbo "Editar con Cipher" en el clic derecho de cada extensión de código (via
+#     SystemFileAssociations: no toca el default ni el ProgID del tipo). En el menú nuevo de
+#     Win11 aparece dentro de "Mostrar más opciones"; con el menú clásico restaurado, directo.
+foreach ($e in $exts) {
+  $verb = "$cls\SystemFileAssociations\$e\shell\cipher.edit"
+  New-Item -Path "$verb\command" -Force | Out-Null
+  Set-ItemProperty $verb '(default)' 'Editar con Cipher'
+  Set-ItemProperty $verb 'Icon' "`"$exe`""
+  Set-ItemProperty "$verb\command" '(default)' "`"$exe`" `"%1`""
+}
+
 # 5) App Paths (permite ejecutar "cipher" desde Ejecutar/iniciar)
 New-Item -Path $appPaths -Force | Out-Null
 Set-ItemProperty $appPaths '(default)' $exe
@@ -137,4 +149,4 @@ try { Set-ItemProperty $uninstKey EstimatedSize ([math]::Round((Get-Item $exe).L
 
 Write-Host "Cipher $version instalado en $installDir" -ForegroundColor Green
 Write-Host "Acceso directo: $startLnk"
-Write-Host "Para abrir un archivo: clic derecho -> Abrir con -> Cipher (o arrastralo a la ventana)."
+Write-Host "Para abrir un archivo: clic derecho -> 'Editar con Cipher' (en Win11, dentro de 'Mostrar más opciones'), 'Abrir con -> Cipher', o arrastralo a la ventana."
