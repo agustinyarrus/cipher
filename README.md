@@ -23,8 +23,8 @@ para *leer* código lindo, no para editarlo.
 Todo el trabajo de resaltado vive en Go (vía [chroma](https://github.com/alecthomas/chroma), un port
 de Pygments): sin CDNs, sin dependencias en tiempo de ejecución. La UI es una ventana
 [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/) **sin marco del sistema**: la
-barra de título y los botones los dibuja la propia app, con la paleta Nocturne (Tokyo Night) y
-tipografía Cascadia Code.
+barra de título y los botones los dibuja la propia app, con **Onyx** — una paleta propia negro puro
+y monocromo, donde la jerarquía del código la da el brillo — y tipografía Cascadia Code.
 
 ## Características
 

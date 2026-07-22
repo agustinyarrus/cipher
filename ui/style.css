@@ -1,24 +1,22 @@
-/* Cipher — visor de código ultraminimalista. Todo en Cascadia Code, dark, paleta Nocturne. */
+/* Cipher — visor de código ultraminimalista. Todo en Cascadia Code, dark, paleta Onyx (negro puro, monocromo). */
 
 :root{
-  --bg:        #08090C;   /* fondo base, casi negro azulado */
-  --surface:   #0B0E14;   /* superficie levemente elevada (titlebar, statusbar) */
-  --surface-2: #0C0E15;   /* fondo del código */
-  --fg:        #C8CDD9;   /* texto */
-  --fg-strong: #E9ECF3;
-  --fg-dim:    #767D8E;
-  --fg-faint:  #474E5E;
-  --line:      rgba(255,255,255,.065);
-  --line-soft: rgba(255,255,255,.038);
+  --bg:        #000000;   /* fondo base: negro puro */
+  --surface:   #0B0B0B;   /* superficie levemente elevada (titlebar, statusbar) */
+  --surface-2: #090909;   /* fondo del código */
+  --fg:        #CFCFCF;   /* texto */
+  --fg-strong: #FFFFFF;
+  --fg-dim:    #8A8A8A;
+  --fg-faint:  #4D4D4D;
+  --line:      rgba(255,255,255,.07);
+  --line-soft: rgba(255,255,255,.045);
 
-  --accent:    #7AA2F7;   /* azul Tokyo Night */
-  --accent-d:  #5d7fd1;
-  --accent-soft: rgba(122,162,247,.14);
-  --green:     #9ECE6A;
-  --red:       #F7768E;
-  --orange:    #FF9E64;
-  --cyan:      #2AC3DE;
-  --purple:    #BB9AF7;
+  --accent:    #FFFFFF;   /* blanco: el único acento */
+  --accent-d:  #8F8F8F;
+  --accent-soft: rgba(255,255,255,.10);
+  --green:     #58A76B;   /* funcional: live / ok */
+  --red:       #E5484D;   /* funcional: error / cerrar */
+  --warn:      #D6D6D6;
 
   --ease: cubic-bezier(.22,.61,.36,1);
   --tb-h: 38px;
@@ -59,7 +57,7 @@ svg{ display:block; }
   opacity:0; transition:opacity .4s var(--ease); }
 body.has-doc .tb-center{ opacity:1; }
 .tb-center .name{ max-width:38vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-  color:#aab1c2; font-weight:300; }
+  color:#B8B8B8; font-weight:300; }
 .tb-center .badge{ font-size:10px; color:var(--accent); background:var(--accent-soft);
   padding:1px 7px; border-radius:9px; letter-spacing:.3px; white-space:nowrap; flex:none; }
 .tb-center .badge:empty{ display:none; }
@@ -74,7 +72,7 @@ body.live-on .tb-center .live{ opacity:.8; }
   background:transparent; border:0; cursor:default; color:var(--fg-dim);
   transition:color .14s ease, background .14s ease; }
 .tbtn svg{ stroke:currentColor; stroke-width:1.4; fill:none; stroke-linecap:round; stroke-linejoin:round; }
-.tbtn:hover{ color:var(--fg-strong); background:rgba(255,255,255,.045); }
+.tbtn:hover{ color:var(--fg-strong); background:rgba(255,255,255,.05); }
 .tbtn.on{ color:var(--accent); }
 .tb-sep{ width:1px; height:16px; background:var(--line); margin:0 6px; }
 
@@ -82,8 +80,8 @@ body.live-on .tb-center .live{ opacity:.8; }
   background:transparent; border:0; cursor:default; color:var(--fg-dim);
   transition:background .14s ease, color .14s ease; }
 .winbtn svg{ stroke:currentColor; stroke-width:1.1; fill:none; stroke-linecap:round; stroke-linejoin:round; }
-.winbtn:hover{ background:rgba(255,255,255,.06); color:var(--fg-strong); }
-.winbtn-close:hover{ background:rgba(247,118,142,.16); color:var(--red); }
+.winbtn:hover{ background:rgba(255,255,255,.07); color:var(--fg-strong); }
+.winbtn-close:hover{ background:rgba(229,72,77,.16); color:var(--red); }
 .winbtn .ico-rst{ display:none; }
 body.maximized .winbtn .ico-max{ display:none; }
 body.maximized .winbtn .ico-rst{ display:block; }
@@ -92,8 +90,8 @@ body.maximized .winbtn .ico-rst{ display:block; }
 #progress{ position:fixed; top:var(--tb-h); left:0; right:0; height:2px; z-index:55;
   background:transparent; pointer-events:none; }
 #progressBar{ display:block; height:100%; width:0;
-  background:linear-gradient(90deg, var(--accent-d), var(--accent), var(--cyan));
-  box-shadow:0 0 8px -1px rgba(122,162,247,.6); transition:width .12s linear; opacity:0; }
+  background:linear-gradient(90deg, #6E6E6E, #BFBFBF, var(--accent));
+  box-shadow:0 0 8px -1px rgba(255,255,255,.45); transition:width .12s linear; opacity:0; }
 body.has-doc #progressBar{ opacity:1; }
 
 /* ============================ splash de arranque ============================ */
@@ -107,13 +105,13 @@ body.ready #splash{ opacity:0; visibility:hidden; pointer-events:none; }
 .splash-mark .s-slash{ stroke:var(--accent); stroke-width:7; stroke-linecap:round;
   animation:splashGlow 2.4s ease-in-out infinite; }
 @keyframes splashBreathe{ 0%,100%{ transform:scale(.97); opacity:.8 } 50%{ transform:scale(1.03); opacity:1 } }
-@keyframes splashGlow{ 0%,100%{ filter:drop-shadow(0 0 3px rgba(122,162,247,.25)) }
-  50%{ filter:drop-shadow(0 0 11px rgba(122,162,247,.7)) } }
+@keyframes splashGlow{ 0%,100%{ filter:drop-shadow(0 0 3px rgba(255,255,255,.20)) }
+  50%{ filter:drop-shadow(0 0 11px rgba(255,255,255,.55)) } }
 
 /* ============================ busqueda ============================ */
 #findbar{ position:fixed; top:calc(var(--tb-h) + 12px); right:22px; z-index:70;
   display:none; align-items:center; gap:7px; padding:6px 8px 6px 11px;
-  background:rgba(13,16,24,.92); border:1px solid var(--line); border-radius:10px;
+  background:rgba(10,10,10,.92); border:1px solid var(--line); border-radius:10px;
   backdrop-filter:blur(18px) saturate(150%); -webkit-backdrop-filter:blur(18px) saturate(150%);
   box-shadow:0 14px 40px -16px rgba(0,0,0,.8);
   transform:translateY(-8px); opacity:0; transition:opacity .18s var(--ease), transform .18s var(--ease); }
@@ -127,10 +125,10 @@ body.find-open #findbar{ display:flex; transform:translateY(0); opacity:1; }
   background:transparent; border:0; cursor:default; color:var(--fg-dim);
   transition:background .14s, color .14s; }
 .find-nav svg{ stroke:currentColor; stroke-width:1.5; fill:none; stroke-linecap:round; stroke-linejoin:round; }
-.find-nav:hover{ background:rgba(255,255,255,.06); color:var(--fg-strong); }
+.find-nav:hover{ background:rgba(255,255,255,.07); color:var(--fg-strong); }
 
-::highlight(cipher-find){ background-color:rgba(122,162,247,.26); color:#fff; }
-::highlight(cipher-find-current){ background-color:var(--orange); color:#08090C; }
+::highlight(cipher-find){ background-color:rgba(255,255,255,.25); color:#fff; }
+::highlight(cipher-find-current){ background-color:var(--accent); color:#000000; }
 
 /* ============================ vista de codigo ============================ */
 #view{ position:fixed; top:var(--tb-h); left:0; right:0; bottom:var(--status-h);
@@ -151,13 +149,13 @@ body.no-doc #code{ display:none; }
 
 /* cada línea = fila flex: gutter de número (sticky) + código */
 .chroma .line{ display:flex; align-items:flex-start; min-width:100%; }
-.chroma .line:hover{ background:rgba(255,255,255,.022); }
+.chroma .line:hover{ background:rgba(255,255,255,.03); }
 .chroma .ln{ flex:0 0 auto; white-space:pre; text-align:right;
   -webkit-user-select:none; user-select:none;
-  color:#3b4261; padding:0 14px 0 18px;
+  color:#3A3A3A; padding:0 14px 0 18px;
   position:sticky; left:0; z-index:2; background:var(--surface-2);
   border-right:1px solid var(--line-soft); }
-.chroma .line:hover .ln{ color:#5b6488; }
+.chroma .line:hover .ln{ color:#6A6A6A; }
 .chroma .cl{ flex:0 0 auto; white-space:pre; padding:0 22px 0 16px; }
 body.wrap .chroma .cl{ flex:1 1 auto; min-width:0;
   white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; }
@@ -167,7 +165,7 @@ body.wrap .chroma .cl{ flex:1 1 auto; min-width:0;
   white-space:pre-wrap; overflow-wrap:anywhere;
   font-family:"Cascadia Code","Cascadia Mono",monospace; font-size:calc(13px * var(--rscale));
   line-height:1.62; color:var(--fg); -webkit-user-select:text; user-select:text; }
-#code pre.cipher-msg{ color:var(--orange); }
+#code pre.cipher-msg{ color:var(--warn); }
 
 /* aviso central (archivo binario / vacío) */
 .notice{ position:absolute; inset:0; display:flex;
@@ -188,8 +186,8 @@ body.wrap .chroma .cl{ flex:1 1 auto; min-width:0;
 .st-item{ color:var(--fg-dim); white-space:nowrap; font-variant-numeric:tabular-nums; }
 .st-item:empty{ display:none; }
 .st-pill{ display:none; padding:1px 8px; border-radius:10px; font-size:10px; letter-spacing:.3px; white-space:nowrap; }
-#stDecomp.on{ display:inline; color:var(--purple); background:rgba(187,154,247,.12); border:1px solid rgba(187,154,247,.30); }
-#stTrunc.on{ display:inline; color:var(--orange); background:rgba(255,158,100,.12); border:1px solid rgba(255,158,100,.30); }
+#stDecomp.on{ display:inline; color:var(--fg); background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.22); }
+#stTrunc.on{ display:inline; color:var(--warn); background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.22); }
 body.no-doc #statusbar .st-right,body.no-doc #stPath{ opacity:0; }
 
 /* ============================ estado vacio ============================ */
@@ -202,7 +200,7 @@ body.has-doc #empty{ opacity:0; pointer-events:none; }
 .empty-mark svg{ overflow:visible; }
 .empty-mark .e-chev{ fill:none; stroke:var(--fg-faint); stroke-width:7; stroke-linecap:round; stroke-linejoin:round; }
 .empty-mark .e-slash{ stroke:var(--accent); stroke-width:7; stroke-linecap:round;
-  filter:drop-shadow(0 0 6px rgba(122,162,247,.4)); }
+  filter:drop-shadow(0 0 6px rgba(255,255,255,.35)); }
 .empty-title{ font-size:14px; color:var(--fg-dim); letter-spacing:.3px; margin-bottom:7px; }
 .empty-sub{ font-size:11.5px; color:var(--fg-faint); letter-spacing:.4px; margin-bottom:26px; }
 .empty-row{ margin-bottom:30px; }
@@ -210,10 +208,10 @@ body.has-doc #empty{ opacity:0; pointer-events:none; }
   background:var(--surface); border:1px solid var(--line); color:var(--fg);
   font-family:inherit; font-size:12.5px; font-weight:300; letter-spacing:.4px; cursor:default;
   transition:border-color .18s, background .18s, transform .12s; }
-.open-btn:hover{ border-color:rgba(122,162,247,.4); background:#0f131b; }
+.open-btn:hover{ border-color:rgba(255,255,255,.35); background:#101010; }
 .open-btn:active{ transform:translateY(1px); }
 .kbd{ font-size:10px; color:var(--fg-dim); letter-spacing:1px; padding:2px 6px; border-radius:5px;
-  background:rgba(255,255,255,.04); border:1px solid var(--line); }
+  background:rgba(255,255,255,.05); border:1px solid var(--line); }
 .empty-hints{ display:flex; gap:18px; font-size:11px; color:var(--fg-faint); letter-spacing:.3px;
   flex-wrap:wrap; justify-content:center; max-width:80vw; }
 .empty-hints b{ color:var(--fg-dim); font-weight:400; }
@@ -221,16 +219,16 @@ body.has-doc #empty{ opacity:0; pointer-events:none; }
 /* arrastrando un archivo encima */
 body.dragover #view::after{ content:"Soltá para abrir"; position:absolute; inset:14px;
   display:flex; align-items:center; justify-content:center; z-index:30; font-size:13px; color:var(--accent);
-  border:1.5px dashed rgba(122,162,247,.5); border-radius:14px; background:rgba(122,162,247,.06);
+  border:1.5px dashed rgba(255,255,255,.45); border-radius:14px; background:rgba(255,255,255,.05);
   backdrop-filter:blur(2px); }
 
 /* toast */
 #toast{ position:absolute; left:50%; top:14px; transform:translateX(-50%) translateY(-8px);
   padding:7px 14px; border-radius:8px; z-index:40;
-  background:rgba(247,118,142,.12); border:1px solid rgba(247,118,142,.28); color:#f3a6b4;
+  background:rgba(229,72,77,.13); border:1px solid rgba(229,72,77,.30); color:#F1A6A9;
   font-size:11.5px; letter-spacing:.3px; opacity:0; transition:opacity .25s, transform .25s; pointer-events:none; }
 #toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
-#toast.ok{ background:rgba(158,206,106,.12); border-color:rgba(158,206,106,.3); color:#bfe39a; }
+#toast.ok{ background:rgba(88,167,107,.13); border-color:rgba(88,167,107,.30); color:#ABD8B8; }
 
 /* ============================ bordes de redimension ============================ */
 .rsz{ position:fixed; z-index:80; }

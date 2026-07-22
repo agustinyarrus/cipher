@@ -1,6 +1,6 @@
 package main
 
-// webview_bg.go — pone el color de fondo por defecto de WebView2 en #08090C (el dark de Cipher).
+// webview_bg.go — pone el color de fondo por defecto de WebView2 en #000000 (el dark de Cipher).
 //
 // Sin esto, el `about:blank` que WebView2 muestra ANTES de cargar la página es BLANCO → al abrir se
 // ve un flash blanco con barra de título nativa hasta que aplica el dark/frameless y carga el doc.
@@ -50,6 +50,6 @@ func setWebViewDarkBackground(w webview2.WebView) {
 		dlog("setDarkBg: controller2 nil")
 		return
 	}
-	err := ctrl2.PutDefaultBackgroundColor(edge.COREWEBVIEW2_COLOR{A: 255, R: 0x08, G: 0x09, B: 0x0C})
+	err := ctrl2.PutDefaultBackgroundColor(edge.COREWEBVIEW2_COLOR{A: 255, R: 0x00, G: 0x00, B: 0x00})
 	dlog("setDarkBg: aplicado, err=", err)
 }
