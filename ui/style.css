@@ -30,7 +30,7 @@ html,body{
   height:100%; width:100%; overflow:hidden;
   background:var(--bg); color:var(--fg);
   font-family:"Cascadia Code","Cascadia Mono",ui-monospace,"Segoe UI",sans-serif;
-  font-weight:300; font-size:13px;
+  font-weight:200; font-size:13px;
   -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
   -webkit-user-select:none; user-select:none; cursor:default;
 }
@@ -141,7 +141,7 @@ body.wrap #code{ width:auto; }
 body.no-doc #code{ display:none; }
 
 #code .chroma{ display:block; background:transparent !important;
-  font-family:"Cascadia Code","Cascadia Mono",ui-monospace,monospace; font-weight:300;
+  font-family:"Cascadia Code","Cascadia Mono",ui-monospace,monospace; font-weight:200;
   font-size:calc(13px * var(--rscale)); line-height:1.62;
   -webkit-user-select:text; user-select:text; }
 /* el <code> del navegador trae font-family:monospace (UA) y pisaria la Cascadia de .chroma -> inherit */
