@@ -73,11 +73,21 @@ function paint(j, opts) {
 }
 
 // ---- barra de estado ----------------------------------------------------
+const nf = new Intl.NumberFormat('es-AR');
 function humanSize(n) {
   if (n == null) return '';
   if (n < 1024) return n + ' B';
   if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
   return (n / 1024 / 1024).toFixed(2) + ' MB';
+}
+// fecha de modificación compacta: "hoy 13:24", "22/07 13:24" o "22/07/25 13:24" si es de otro año
+function fmtWhen(ms) {
+  if (!ms) return '';
+  const d = new Date(ms), now = new Date(), p = (x) => String(x).padStart(2, '0');
+  const hm = p(d.getHours()) + ':' + p(d.getMinutes());
+  if (d.toDateString() === now.toDateString()) return 'hoy ' + hm;
+  const dm = p(d.getDate()) + '/' + p(d.getMonth() + 1);
+  return (d.getFullYear() === now.getFullYear() ? dm : dm + '/' + String(d.getFullYear()).slice(-2)) + ' ' + hm;
 }
 function fillStatus(j) {
   $('stPath').textContent = j.path || j.name || '';
@@ -89,8 +99,11 @@ function fillStatus(j) {
   else { tr.textContent = ''; tr.classList.remove('on'); }
   $('stLang').textContent = j.binary ? 'binario' : (j.lang || '');
   $('stLines').textContent = j.binary ? '' : ((j.lines || 0) + (j.lines === 1 ? ' línea' : ' líneas'));
+  $('stChars').textContent = (j.binary || j.chars == null) ? '' : nf.format(j.chars) + ' carac.';
   $('stSize').textContent = humanSize(j.binary ? j.bytes : (j.size != null ? j.size : j.bytes));
   $('stEol').textContent = j.binary ? '' : (j.crlf ? 'CRLF' : 'LF');
+  $('stMod').textContent = j.mtime ? 'mod ' + fmtWhen(j.mtime) : '';
+  $('stSel').textContent = '';
 }
 
 // ---- aviso central (binario / vacío) ------------------------------------
@@ -160,6 +173,9 @@ function updateProgress() {
   const denom = Math.max(1, view.scrollHeight - view.clientHeight);
   const p = Math.min(1, Math.max(0, view.scrollTop / denom));
   $('progressBar').style.width = (p * 100) + '%';
+  // % de lectura en la barra de estado (sólo si hay documento y da para scrollear)
+  const scrollable = view.scrollHeight > view.clientHeight + 2;
+  $('stPos').textContent = (body.classList.contains('has-doc') && scrollable) ? Math.round(p * 100) + '%' : '';
 }
 view.addEventListener('scroll', updateProgress, { passive: true });
 
@@ -258,6 +274,8 @@ let wrap = window.__CIPHER_WRAP__ === true;
 function applyScale() {
   rscale = Math.min(2.2, Math.max(0.6, rscale));
   document.documentElement.style.setProperty('--rscale', rscale.toFixed(3));
+  // indicador de zoom en la barra de estado (sólo cuando no está al 100%)
+  $('stZoom').textContent = Math.abs(rscale - 1) < 0.005 ? '' : Math.round(rscale * 100) + '%';
 }
 function applyWrap() {
   body.classList.toggle('wrap', wrap);
@@ -374,6 +392,13 @@ function toast(msg, ok) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2000);
 }
 window.addEventListener('contextmenu', (e) => { if (!typing() && !window.getSelection().toString()) e.preventDefault(); });
+// contador de selección vivo en la barra de estado (sólo selecciones dentro del código)
+document.addEventListener('selectionchange', () => {
+  const s = window.getSelection();
+  let n = 0;
+  if (s && s.rangeCount && !s.isCollapsed && code.contains(s.anchorNode)) n = s.toString().length;
+  $('stSel').textContent = n > 0 ? 'sel ' + nf.format(n) : '';
+});
 window.addEventListener('resize', () => {
   body.classList.toggle('maximized', !isFs && window.innerWidth >= screen.availWidth - 6);
   updateProgress();

@@ -833,6 +833,7 @@ func startServer(initialPath string) string {
 			"lang":       res.Lang,
 			"lines":      res.Lines,
 			"bytes":      res.Bytes,
+			"chars":      res.Chars,
 			"decompiled": res.Decompiled,
 			"tool":       res.Tool,
 			"binary":     res.Binary,
@@ -870,7 +871,7 @@ func startServer(initialPath string) string {
 		}
 		writeJSON(wr, map[string]any{
 			"ok": true, "html": res.HTML, "lang": res.Lang, "lines": res.Lines,
-			"bytes": res.Bytes, "binary": res.Binary, "truncated": res.Truncated,
+			"bytes": res.Bytes, "chars": res.Chars, "binary": res.Binary, "truncated": res.Truncated,
 			"crlf": res.CRLF, "path": "", "dir": "", "name": filepath.Base(name),
 		})
 	})

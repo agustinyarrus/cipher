@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/alecthomas/chroma/v2"
 	chromahtml "github.com/alecthomas/chroma/v2/formatters/html"
@@ -97,6 +98,7 @@ type RenderResult struct {
 	Lang       string `json:"lang"`       // nombre legible del lenguaje (p.ej. "Go", "Java")
 	Lines      int    `json:"lines"`      // cantidad de líneas
 	Bytes      int    `json:"bytes"`      // tamaño del texto mostrado
+	Chars      int    `json:"chars"`      // cantidad de caracteres (runas) del texto mostrado
 	Decompiled bool   `json:"decompiled"` // true si el contenido salió de un decompilador
 	Tool       string `json:"tool"`       // herramienta de decompilación usada (CFR, javap, …)
 	Binary     bool   `json:"binary"`     // true si el archivo es binario y no se pudo mostrar
@@ -208,6 +210,7 @@ func highlight(code, langHint string) RenderResult {
 		Lang:  langName,
 		Lines: lines,
 		Bytes: len(code),
+		Chars: utf8.RuneCountInString(code),
 	}
 }
 
