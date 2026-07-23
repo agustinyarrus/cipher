@@ -187,6 +187,8 @@ body.wrap .chroma .cl{ flex:1 1 auto; min-width:0;
 .st-right{ display:flex; align-items:center; gap:14px; flex:none; }
 .st-item{ color:var(--fg-dim); white-space:nowrap; font-variant-numeric:tabular-nums; }
 .st-item:empty{ display:none; }
+.st-live{ color:var(--fg); }          /* datos vivos (selección, zoom) un paso más brillantes */
+.st-pos{ min-width:32px; text-align:right; }
 .st-pill{ display:none; padding:1px 8px; border-radius:10px; font-size:10px; letter-spacing:.3px; white-space:nowrap; }
 #stDecomp.on{ display:inline; color:var(--fg); background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.22); }
 #stTrunc.on{ display:inline; color:var(--warn); background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.22); }
