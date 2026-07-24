@@ -77,41 +77,55 @@ function paint(j, opts) {
 // Zonas marcadas (--hl): resalta rangos de líneas (dónde se modificó un archivo), salta a la
 // primera zona al abrir y permite navegar entre zonas con n/p (o click en la pill de estado).
 // =========================================================================
-const marks = { regions: [], idx: -1 }; // regions = [{els: [span.line…], from, to}]
+const marks = { regions: [], idx: -1, counts: [0, 0, 0] }; // regions = [{els, from, to, kind}]
+// kind (semántica de diff): 0 = neutral crema (modificado), 1 = verde (agregado), 2 = rojo (borrado)
+const MK_CLS = ['', 'hl-add', 'hl-del'];
+const MK_SYM = ['~', '+', '−'];
 
 function applyMarks(hl, opts) {
-  marks.regions = []; marks.idx = -1;
+  marks.regions = []; marks.idx = -1; marks.counts = [0, 0, 0];
   const pill = $('stMarks');
   const ranges = Array.isArray(hl) ? hl : [];
   const lines = ranges.length ? code.querySelectorAll('.chroma .line') : [];
-  let total = 0;
   for (const r of ranges) {
     const from = r[0], to = Math.min(r[1], lines.length);
+    const kind = (r[2] === 1 || r[2] === 2) ? r[2] : 0;
     if (!(from >= 1 && from <= lines.length)) continue;
     const els = [];
-    for (let n = from; n <= to; n++) { els.push(lines[n - 1]); lines[n - 1].classList.add('hl'); }
+    for (let n = from; n <= to; n++) {
+      els.push(lines[n - 1]);
+      lines[n - 1].classList.add('hl');
+      if (MK_CLS[kind]) lines[n - 1].classList.add(MK_CLS[kind]);
+    }
     els[0].classList.add('hl-start');
     els[els.length - 1].classList.add('hl-end');
-    marks.regions.push({ els, from, to });
-    total += els.length;
+    marks.regions.push({ els, from, to, kind });
+    marks.counts[kind] += els.length;
   }
   if (!marks.regions.length) { pill.textContent = ''; pill.classList.remove('on'); return; }
-  updateMarksPill(total);
+  updateMarksPill();
   // al abrir, llevar la vista a la primera zona (en recarga viva se conserva la posición)
   if (!opts || !opts.silent) {
     marks.idx = 0;
     requestAnimationFrame(() => { focusMark(false); updateProgress(); });
   }
 }
-function updateMarksPill(total) {
-  const n = marks.regions.length;
-  const pos = marks.idx >= 0 ? (marks.idx + 1) + '/' + n : n;
-  $('stMarks').textContent = n === 1
-    ? ('§ ' + regionLabel(marks.regions[0]))
-    : ('§ ' + pos + ' zonas' + (total ? ' · ' + total + ' líneas' : ''));
+function updateMarksPill() {
+  const n = marks.regions.length, c = marks.counts;
+  let html;
+  if (n === 1) {
+    const rg = marks.regions[0];
+    const label = rg.from === rg.to ? 'línea ' + rg.from : 'líneas ' + rg.from + '–' + rg.to;
+    html = '§ <span class="mk-' + rg.kind + '">' + (rg.kind ? MK_SYM[rg.kind] + ' ' : '') + label + '</span>';
+  } else {
+    html = '§ ' + (marks.idx >= 0 ? (marks.idx + 1) + '/' : '') + n + ' zonas';
+    if (c[1]) html += ' <span class="mk-1">+' + c[1] + '</span>';
+    if (c[2]) html += ' <span class="mk-2">−' + c[2] + '</span>';
+    if (c[0]) html += ' <span class="mk-0">~' + c[0] + '</span>';
+  }
+  $('stMarks').innerHTML = html; // sólo números/labels propios, sin contenido del archivo
   $('stMarks').classList.add('on');
 }
-function regionLabel(rg) { return rg.from === rg.to ? 'línea ' + rg.from : 'líneas ' + rg.from + '–' + rg.to; }
 function focusMark(smooth) {
   const rg = marks.regions[marks.idx];
   if (!rg) return;
@@ -119,7 +133,7 @@ function focusMark(smooth) {
   for (const el of rg.els) {
     el.classList.remove('hl-flash'); void el.offsetWidth; el.classList.add('hl-flash');
   }
-  updateMarksPill(marks.regions.reduce((a, r) => a + r.els.length, 0));
+  updateMarksPill();
 }
 function gotoMark(dir) {
   if (!marks.regions.length) return;

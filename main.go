@@ -438,12 +438,24 @@ func getHL(path string) string {
 	return hlSpecs[path]
 }
 
-// parseHLSpec convierte "12-15,40,7-9" en pares [ini,fin] 1-based, ordenados y con solapados
-// fusionados. Entradas inválidas se ignoran en silencio (la spec viene de línea de comandos).
-func parseHLSpec(spec string) [][2]int {
-	out := [][2]int{}
+// parseHLSpec convierte "12-15,+40,-7-9" en tripletas [ini,fin,tipo] 1-based, ordenadas y con
+// solapados del MISMO tipo fusionados. Tipo por prefijo del item: sin prefijo = 0 neutral crema
+// (modificado), '+' = 1 verde (agregado), '-' = 2 rojo (borrado) — semántica de diff. Entradas
+// inválidas se ignoran en silencio (la spec viene de línea de comandos).
+func parseHLSpec(spec string) [][3]int {
+	out := [][3]int{}
 	for _, part := range strings.Split(spec, ",") {
 		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		kind := 0
+		switch part[0] {
+		case '+':
+			kind, part = 1, strings.TrimSpace(part[1:])
+		case '-':
+			kind, part = 2, strings.TrimSpace(part[1:])
+		}
 		if part == "" {
 			continue
 		}
@@ -464,12 +476,12 @@ func parseHLSpec(spec string) [][2]int {
 		if b < a {
 			a, b = b, a
 		}
-		out = append(out, [2]int{a, b})
+		out = append(out, [3]int{a, b, kind})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i][0] < out[j][0] })
 	merged := out[:0]
 	for _, r := range out {
-		if n := len(merged); n > 0 && r[0] <= merged[n-1][1]+1 {
+		if n := len(merged); n > 0 && r[2] == merged[n-1][2] && r[0] <= merged[n-1][1]+1 {
 			if r[1] > merged[n-1][1] {
 				merged[n-1][1] = r[1]
 			}
@@ -612,8 +624,9 @@ func main() {
 		return
 	}
 
-	// argumentos: [archivo] [--hl RANGOS]. --hl marca líneas (p.ej. "12-15,40,60-72"): zonas
+	// argumentos: [archivo] [--hl RANGOS]. --hl marca líneas (p.ej. "12-15,+40,-60-72"): zonas
 	// resaltadas + salto a la primera, para señalar dónde se modificó un archivo (diffs, reviews).
+	// Prefijo por item: sin prefijo = crema (modificado), '+' = verde (agregado), '-' = rojo (borrado).
 	initialPath := ""
 	initialHL := ""
 	cliArgs := os.Args[1:]
