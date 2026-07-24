@@ -29,13 +29,17 @@ monocromo y el código en un arcoíris neón pleno — y tipografía Cascadia Co
 ## Características
 
 - **+250 lenguajes** detectados por extensión, nombre de archivo o contenido.
+- **Pestañas**: cada archivo abre en su pestaña (sin duplicar), con cambio instantáneo que conserva
+  el scroll. Con un solo archivo la barra queda limpia como siempre; la tira aparece recién con dos.
+  Si un archivo de una pestaña en segundo plano cambia en disco, un punto verde lo delata.
 - **Decompilación de `.class`** (bytecode de Java) → fuente Java legible, vía [CFR](https://github.com/leibnitz27/cfr)
   embebido (con `javap` del JDK como respaldo). Requiere Java instalado sólo para esto.
 - **Números de línea** con gutter fijo, búsqueda incremental (`Ctrl F`), **ajuste de línea** (`W`),
   zoom (`Ctrl ±` / `Ctrl` + rueda), copiar todo (`Ctrl C`) y **pantalla completa** (`F`).
 - **Recarga en vivo**: si el archivo cambia en disco, la vista se actualiza sola.
 - **Barra de estado** con lenguaje, líneas, tamaño, codificación (LF/CRLF) y si vino decompilado.
-- **Arrastrar y soltar** cualquier archivo. Instancia única (daemon caliente: reabrir es instantáneo).
+- **Arrastrar y soltar** uno o varios archivos; el diálogo de abrir también acepta multi-selección,
+  y `cipher a.go b.go c.go` abre los tres. Instancia única (daemon caliente: reabrir es instantáneo).
 - Un solo **`.exe` portable** (~17 MB), dark y frameless desde el primer pixel (sin flash blanco).
 
 ## Atajos
@@ -45,6 +49,8 @@ monocromo y el código en un arcoíris neón pleno — y tipografía Cascadia Co
 | `Ctrl O` | Abrir | | `W` | Ajuste de línea |
 | `Ctrl F` | Buscar | | `Ctrl ±` | Zoom |
 | `Ctrl C` | Copiar todo | | `F` | Pantalla completa |
+| `Ctrl Tab` | Pestaña siguiente / anterior | | `Ctrl W` | Cerrar pestaña |
+| `Ctrl 1…9` | Ir a la pestaña n | | rueda sobre la tira | Desplazar pestañas |
 | `g` / `G` | Inicio / fin | | `j` / `k` | Bajar / subir |
 
 ## Build

@@ -49,7 +49,7 @@ svg{ display:block; }
   background:var(--surface); z-index:60;
   border-bottom:1px solid var(--line-soft);
 }
-.tb-left{ display:flex; align-items:center; gap:9px; padding-left:13px; min-width:0; }
+.tb-left{ display:flex; align-items:center; gap:9px; padding-left:13px; min-width:0; height:100%; overflow:hidden; }
 .mark svg{ overflow:visible; }
 .mark .m-chev{ fill:none; stroke:var(--fg-faint); stroke-width:8; stroke-linecap:round; stroke-linejoin:round; }
 .mark .m-slash{ stroke:var(--accent); stroke-width:8; stroke-linecap:round; }
@@ -81,6 +81,47 @@ body.live-on .tb-center .live{ opacity:.8; }
 .tbtn:hover{ color:var(--fg-strong); background:rgba(255,255,255,.05); }
 .tbtn.on{ color:var(--accent); }
 .tb-sep{ width:1px; height:16px; background:var(--line); margin:0 6px; }
+
+/* ---- pestañas (2+ archivos abiertos; con uno solo, el caption centrado de siempre) ----
+   Pills compactas sobre el negro puro: texto dim que se enciende al activar, relleno y hairline
+   suaves (mismo lenguaje que las pills de la barra de estado), × al pasar el mouse, punto verde
+   cuando el archivo cambió en disco estando de fondo, y fades laterales al desbordar. */
+body.tabs-on #titlebar{ grid-template-columns:minmax(0,1fr) auto; }
+body.tabs-on .tb-center{ display:none; }
+body.tabs-on .tb-left{ padding-left:8px; }
+
+#tabs{ display:none; align-items:center; gap:3px; height:100%; flex:1 1 auto; min-width:0;
+  overflow-x:auto; overflow-y:hidden; padding-right:10px; scrollbar-width:none;
+  --fL:0px; --fR:0px;
+  -webkit-mask-image:linear-gradient(90deg,transparent 0,#000 var(--fL),#000 calc(100% - var(--fR)),transparent 100%);
+          mask-image:linear-gradient(90deg,transparent 0,#000 var(--fL),#000 calc(100% - var(--fR)),transparent 100%); }
+#tabs::-webkit-scrollbar{ display:none; }
+#tabs.fade-l{ --fL:22px; }
+#tabs.fade-r{ --fR:22px; }
+body.tabs-on #tabs{ display:flex; }
+
+.tab{ position:relative; display:flex; align-items:center; flex:0 1 auto; min-width:76px; max-width:188px;
+  height:26px; padding:0 5px 0 14px; border-radius:7px; border:1px solid transparent;
+  font-size:11.5px; letter-spacing:.2px; color:var(--fg-dim); white-space:nowrap;
+  transition:background .14s ease, color .14s ease, border-color .14s ease;
+  animation:tabIn .18s var(--ease); }
+.tab:hover{ background:rgba(255,255,255,.04); color:#C6C6C6; }
+.tab.active{ background:rgba(255,255,255,.07); border-color:rgba(255,255,255,.09); color:#ECECEC; }
+@keyframes tabIn{ from{ opacity:0; transform:translateY(2px) scale(.97); } to{ opacity:1; transform:none; } }
+
+.tab-dot{ position:absolute; left:5px; top:50%; width:5px; height:5px; margin-top:-2.5px; border-radius:50%;
+  background:var(--green); box-shadow:0 0 6px -1px var(--green); opacity:0; transition:opacity .25s; }
+.tab.stale .tab-dot{ opacity:.9; }              /* cambió en disco en segundo plano */
+.tab-dot.pulse{ animation:tabdotpulse .9s var(--ease); }
+@keyframes tabdotpulse{ 0%{ opacity:.9; transform:scale(1); } 40%{ opacity:1; transform:scale(2); } 100%{ opacity:0; transform:scale(1); } }
+
+.tab-name{ min-width:0; flex:0 1 auto; overflow:hidden; text-overflow:ellipsis; }
+.tab-x{ width:16px; height:16px; margin-left:5px; flex:none; display:grid; place-items:center;
+  border-radius:5px; color:var(--fg-faint); opacity:0;
+  transition:opacity .12s ease, background .12s ease, color .12s ease; }
+.tab-x svg{ stroke:currentColor; stroke-width:1.3; fill:none; stroke-linecap:round; }
+.tab:hover .tab-x,.tab.active .tab-x{ opacity:1; }
+.tab-x:hover{ background:rgba(255,255,255,.10); color:var(--fg-strong); }
 
 .winbtn{ width:46px; height:var(--tb-h); display:grid; place-items:center;
   background:transparent; border:0; cursor:default; color:var(--fg-dim);
@@ -145,6 +186,11 @@ body.no-doc #view{ overflow:hidden; }
 #code{ min-width:100%; width:max-content; padding:9px 0 42vh; }
 body.wrap #code{ width:auto; }
 body.no-doc #code{ display:none; }
+
+/* cada pestaña conserva su documento ya renderizado (cambio instantáneo); sólo el activo se ve */
+#code > .doc{ min-width:100%; width:max-content; }
+body.wrap #code > .doc{ width:auto; }
+#code > .doc[hidden]{ display:none; }
 
 #code .chroma{ display:block; background:transparent !important;
   font-family:"Cascadia Code","Cascadia Code ExtraLight","Cascadia Mono",ui-monospace,monospace; font-weight:200;

@@ -127,15 +127,21 @@ var (
 	pAllowSetForegroundWindow = user32.NewProc("AllowSetForegroundWindow")
 	pDwmSetWindowAttribute    = dwmapi.NewProc("DwmSetWindowAttribute")
 
-	// onShow lo setea main() una vez creada la ventana: lo invoca el handler /api/show cuando
-	// otra invocación de cipher.exe le pasa un documento (instancia única).
-	onShow func(string)
+	// bus SSE único hacia la página: "open\t<ruta>" (handoff del daemon) y "change\t<ruta>" (el
+	// archivo cambió en disco). UN SOLO EventSource del lado del navegador: Chromium limita a 6 las
+	// conexiones HTTP/1.1 por host, y con un SSE por pestaña la 7ª request quedaba encolada PARA
+	// SIEMPRE (pasó: ráfaga de handoffs → 5 pestañas + bus = 6 conexiones vivas → el /render
+	// siguiente jamás salía y las aperturas restantes morían en silencio). Multiplexar lo cura de
+	// raíz y además es más liviano. Más robusto que un Eval directo cuando la ventana venía oculta
+	// (daemon caliente): la conexión SSE sobrevive y reconecta.
+	busSubsMu   sync.Mutex
+	busSubs     = map[chan string]struct{}{}
+	pendingOpen string // última ruta pedida; se reenvía a cada cliente que (re)conecta al bus
 
-	// canal "abrir documento": el server avisa al cliente por SSE qué .md mostrar. Más robusto que
-	// un Eval directo cuando la ventana venía oculta (daemon caliente): la conexión SSE sobrevive.
-	openSubsMu  sync.Mutex
-	openSubs    = map[chan string]struct{}{}
-	pendingOpen string // última ruta pedida; se reenvía a cada cliente que (re)conecta al canal
+	// lista de vigilancia declarativa: la página la repone entera en cada cambio de pestañas
+	// (/api/watch) y UN goroutine la pollea; cambió el mtime -> "change" por el bus.
+	watchMu  sync.Mutex
+	watchSet = map[string]time.Time{}
 
 	darkBrush  uintptr
 	subclassCB uintptr // callback de subclassProc; lo instala el CBT hook al crearse la ventana
@@ -349,15 +355,36 @@ func targetWindowPos(ww, hh int32) (x, y int32, maximized bool) {
 }
 
 // bringToFront restaura (si está minimizada) y trae la ventana al frente de forma fiable.
+// Corre SIEMPRE en el worker (ver frontReq), nunca en el hilo de UI: SetWindowPos(TOPMOST) /
+// SetForegroundWindow pueden negociar sincrónicamente con ventanas de otros procesos (incluida la
+// hija de WebView2); si eso se demora y el hilo que espera es el DUEÑO de la ventana (que debería
+// estar bombeando mensajes), la app entera queda congelada. Desde una goroutine aparte, lo peor
+// que puede pasar es que el raise tarde.
 func bringToFront(hwnd uintptr) {
 	if isMinimized(hwnd) {
 		pShowWindow.Call(hwnd, swRESTORE)
 	} else {
 		pShowWindow.Call(hwnd, swSHOW)
 	}
+	dlog("btf: shown")
 	pSetWindowPos.Call(hwnd, hwndTopmost, 0, 0, 0, 0, uintptr(swpNOMOVE|swpNOSIZE|swpSHOWWINDOW))
+	dlog("btf: topmost")
 	pSetWindowPos.Call(hwnd, hwndNoTopmst, 0, 0, 0, 0, uintptr(swpNOMOVE|swpNOSIZE))
+	dlog("btf: notopmost")
 	pSetForegroundWindow.Call(hwnd)
+	dlog("btf: done")
+}
+
+// frontReq alimenta al worker de "traer al frente": un canal de capacidad 1 coalesce ráfagas
+// (diez handoffs seguidos = un raise, quizá dos) y el worker corre en su goroutine para que un
+// SetWindowPos lento/trabado jamás congele el hilo de UI ni pierda aperturas.
+var frontReq = make(chan struct{}, 1)
+
+func requestFront() {
+	select {
+	case frontReq <- struct{}{}:
+	default: // ya hay un raise pendiente: alcanza
+	}
 }
 
 // ---- instancia única (daemon caliente) ---------------------------------
@@ -624,10 +651,11 @@ func main() {
 		return
 	}
 
-	// argumentos: [archivo] [--hl RANGOS]. --hl marca líneas (p.ej. "12-15,+40,-60-72"): zonas
-	// resaltadas + salto a la primera, para señalar dónde se modificó un archivo (diffs, reviews).
-	// Prefijo por item: sin prefijo = crema (modificado), '+' = verde (agregado), '-' = rojo (borrado).
-	initialPath := ""
+	// argumentos: [archivo...] [--hl RANGOS]. Varios archivos = una pestaña cada uno. --hl marca
+	// líneas del PRIMER archivo (p.ej. "12-15,+40,-60-72"): zonas resaltadas + salto a la primera,
+	// para señalar dónde se modificó (diffs, reviews). Prefijo por item: sin prefijo = crema
+	// (modificado), '+' = verde (agregado), '-' = rojo (borrado).
+	var initialPaths []string
 	initialHL := ""
 	cliArgs := os.Args[1:]
 	for i := 0; i < len(cliArgs); i++ {
@@ -639,25 +667,34 @@ func main() {
 		case strings.HasPrefix(a, "--hl="):
 			initialHL = strings.TrimPrefix(a, "--hl=")
 		case strings.TrimSpace(a) != "" && !strings.HasPrefix(a, "--"):
-			if initialPath == "" {
-				if abs, err := filepath.Abs(a); err == nil {
-					initialPath = abs
-				}
+			if abs, err := filepath.Abs(a); err == nil {
+				initialPaths = append(initialPaths, abs)
 			}
 		}
 	}
-	if initialPath != "" {
-		setHL(initialPath, initialHL)
+	if len(initialPaths) > 0 {
+		setHL(initialPaths[0], initialHL)
 	}
 
-	if os.Getenv("CIPHER_NEW") == "" && tryHandoff(initialPath, initialHL) {
-		dlog("handoff a instancia existente; saliendo")
-		return
+	if os.Getenv("CIPHER_NEW") == "" {
+		if len(initialPaths) == 0 {
+			if tryHandoff("", "") {
+				dlog("handoff a instancia existente; saliendo")
+				return
+			}
+		} else if tryHandoff(initialPaths[0], initialHL) {
+			// el daemon vivo aceptó el primero: mandarle el resto (una pestaña por archivo)
+			for _, p := range initialPaths[1:] {
+				tryHandoff(p, "")
+			}
+			dlog("handoff a instancia existente; saliendo")
+			return
+		}
 	}
 
-	addr := startServer(initialPath)
+	addr := startServer(initialPaths)
 	pageURL := "http://" + addr + "/"
-	dlog("server addr", addr, "initial", initialPath)
+	dlog("server addr", addr, "initial", initialPaths)
 	if _, portStr, err := net.SplitHostPort(addr); err == nil {
 		writeLock(portStr)
 		defer removeLock()
@@ -768,11 +805,12 @@ func main() {
 			}
 		})
 	})
-	// Dialogo nativo de apertura (todos los archivos por defecto).
+	// Dialogo nativo de apertura (todos los archivos por defecto, multi-seleccion: una pestaña
+	// por archivo elegido).
 	w.Bind("cipherPick", func() {
 		w.Dispatch(func() {
-			if p := pickCode(hwnd); p != "" {
-				if b, err := json.Marshal(p); err == nil {
+			if ps := pickCode(hwnd); len(ps) > 0 {
+				if b, err := json.Marshal(ps); err == nil {
 					w.Eval("window.__cipherOpen(" + string(b) + ")")
 				}
 			}
@@ -825,15 +863,14 @@ func main() {
 	if debugLog {
 		initJS += "window.__CIPHER_DEBUG__=true;"
 	}
-	onShow = func(p string) {
-		dlog("show", p)
-		w.Dispatch(func() {
-			if p != "" {
-				broadcastOpen(p) // avisa al cliente por SSE qué documento mostrar (robusto)
-			}
+	// worker del raise: bringToFront FUERA del hilo de UI (ver el comentario de bringToFront) y
+	// coalescido, para que una ráfaga de handoffs no lo spamee ni pueda deadlockear la ventana.
+	go func() {
+		for range frontReq {
 			bringToFront(hwnd)
-		})
-	}
+			time.Sleep(150 * time.Millisecond)
+		}
+	}()
 
 	w.Init(initJS)
 	dlog("navigating to", pageURL)
@@ -846,7 +883,7 @@ func main() {
 // Server HTTP local: UI embebida + render del Markdown + assets + recarga en vivo (SSE).
 // ----------------------------------------------------------------------
 
-func startServer(initialPath string) string {
+func startServer(initialPaths []string) string {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		panic(err)
@@ -860,9 +897,9 @@ func startServer(initialPath string) string {
 	mux := http.NewServeMux()
 	mux.Handle("/", http.FileServer(http.FS(sub)))
 
-	// ruta inicial (argumento de CLI) que la pagina consulta al cargar
+	// rutas iniciales (argumentos de CLI) que la pagina consulta al cargar: una pestaña por cada una
 	mux.HandleFunc("/api/initial", func(wr http.ResponseWriter, r *http.Request) {
-		writeJSON(wr, map[string]string{"path": initialPath})
+		writeJSON(wr, map[string]any{"paths": initialPaths})
 	})
 
 	// preferencias persistentes (tamaño de letra, word-wrap). Ver config.go. El tamaño de letra
@@ -884,6 +921,9 @@ func startServer(initialPath string) string {
 	})
 
 	// instancia única: otra invocación de cipher.exe nos manda acá el documento a mostrar.
+	// broadcastOpen y requestFront son seguros desde esta goroutine y desde el arranque mismo:
+	// si la página todavía no se suscribió, pendingOpen le guarda la ruta; si el worker del raise
+	// todavía no corre, frontReq le deja el pedido hecho. Nada depende del hilo de UI.
 	mux.HandleFunc("/api/show", func(wr http.ResponseWriter, r *http.Request) {
 		p := r.URL.Query().Get("path")
 		if p != "" {
@@ -892,10 +932,10 @@ func startServer(initialPath string) string {
 			}
 			// spec de líneas marcadas de ESTA invocación (vacía = limpiar las anteriores)
 			setHL(p, r.URL.Query().Get("hl"))
+			dlog("show", p)
+			broadcastOpen(p)
 		}
-		if onShow != nil {
-			onShow(p)
-		}
+		requestFront()
 		wr.WriteHeader(http.StatusOK)
 	})
 
@@ -1009,50 +1049,67 @@ func startServer(initialPath string) string {
 		fmt.Fprint(wr, ChromaCSS())
 	})
 
-	// recarga en vivo: SSE que avisa cuando el .md cambia en disco.
-	mux.HandleFunc("/events", func(wr http.ResponseWriter, r *http.Request) {
-		path := r.URL.Query().Get("path")
-		flusher, ok := wr.(http.Flusher)
-		if !ok || path == "" {
-			wr.WriteHeader(http.StatusInternalServerError)
+	// vigilancia de archivos: la página declara acá TODAS las rutas abiertas (una por pestaña);
+	// el poller único avisa los cambios por el bus. Reponer la lista entera evita contabilidad
+	// incremental (y sus fugas): lo que no está, deja de vigilarse.
+	mux.HandleFunc("/api/watch", func(wr http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			wr.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		h := wr.Header()
-		h.Set("Content-Type", "text/event-stream")
-		h.Set("Cache-Control", "no-cache")
-		h.Set("Connection", "keep-alive")
-		h.Set("X-Accel-Buffering", "no")
-		fmt.Fprint(wr, ": ok\n\n")
-		flusher.Flush()
-
-		last := time.Time{}
-		if fi, err := os.Stat(path); err == nil {
-			last = fi.ModTime()
+		var body struct {
+			Paths []string `json:"paths"`
 		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil {
+			wr.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		watchMu.Lock()
+		next := make(map[string]time.Time, len(body.Paths))
+		for _, p := range body.Paths {
+			if p == "" {
+				continue
+			}
+			if last, ok := watchSet[p]; ok {
+				next[p] = last // ya vigilada: conservar el mtime conocido
+			} else if fi, err := os.Stat(p); err == nil {
+				next[p] = fi.ModTime() // nueva: arrancar desde el estado actual (sin falso "change")
+			} else {
+				next[p] = time.Time{} // aún no existe: cualquier aparición contará como cambio
+			}
+		}
+		watchSet = next
+		watchMu.Unlock()
+		wr.WriteHeader(http.StatusNoContent)
+	})
+
+	// poller único de la lista de vigilancia (recarga en vivo de todas las pestañas)
+	go func() {
 		ticker := time.NewTicker(400 * time.Millisecond)
 		defer ticker.Stop()
-		ctx := r.Context()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				fi, err := os.Stat(path)
+		for range ticker.C {
+			watchMu.Lock()
+			var changed []string
+			for p, last := range watchSet {
+				fi, err := os.Stat(p)
 				if err != nil {
 					continue
 				}
 				if fi.ModTime().After(last) {
-					last = fi.ModTime()
-					fmt.Fprintf(wr, "data: reload\n\n")
-					flusher.Flush()
+					watchSet[p] = fi.ModTime()
+					changed = append(changed, p)
 				}
 			}
+			watchMu.Unlock()
+			for _, p := range changed {
+				broadcastBus("change\t" + p)
+			}
 		}
-	})
+	}()
 
-	// canal "abrir documento": el cliente se suscribe una vez; el server le empuja la ruta del .md
-	// a mostrar (handoff del daemon caliente). Sobrevive a ocultar/mostrar la ventana.
-	mux.HandleFunc("/openevents", func(wr http.ResponseWriter, r *http.Request) {
+	// bus: EL único SSE de la página (aperturas del daemon + cambios en disco). Ver el comentario
+	// de busSubs por qué multiplexado: el límite de 6 conexiones por host de Chromium es real.
+	mux.HandleFunc("/bus", func(wr http.ResponseWriter, r *http.Request) {
 		flusher, ok := wr.(http.Flusher)
 		if !ok {
 			wr.WriteHeader(http.StatusInternalServerError)
@@ -1063,19 +1120,20 @@ func startServer(initialPath string) string {
 		h.Set("Cache-Control", "no-cache")
 		h.Set("Connection", "keep-alive")
 		h.Set("X-Accel-Buffering", "no")
-		ch := make(chan string, 4)
-		openSubsMu.Lock()
-		openSubs[ch] = struct{}{}
+		// buffer holgado: una rafaga de handoffs (muchos archivos a la vez) no debe perder aperturas
+		ch := make(chan string, 64)
+		busSubsMu.Lock()
+		busSubs[ch] = struct{}{}
 		pend := pendingOpen
-		openSubsMu.Unlock()
+		busSubsMu.Unlock()
 		defer func() {
-			openSubsMu.Lock()
-			delete(openSubs, ch)
-			openSubsMu.Unlock()
+			busSubsMu.Lock()
+			delete(busSubs, ch)
+			busSubsMu.Unlock()
 		}()
 		fmt.Fprint(wr, ": ok\n\n")
 		if pend != "" { // si reconectó tras ocultarse, recupera la última ruta pedida
-			fmt.Fprintf(wr, "data: %s\n\n", pend)
+			fmt.Fprintf(wr, "data: open\t%s\n\n", pend)
 		}
 		flusher.Flush()
 		ctx := r.Context()
@@ -1083,8 +1141,8 @@ func startServer(initialPath string) string {
 			select {
 			case <-ctx.Done():
 				return
-			case p := <-ch:
-				fmt.Fprintf(wr, "data: %s\n\n", p)
+			case m := <-ch:
+				fmt.Fprintf(wr, "data: %s\n\n", m)
 				flusher.Flush()
 			}
 		}
@@ -1113,17 +1171,25 @@ func writeJSON(wr http.ResponseWriter, v any) {
 	json.NewEncoder(wr).Encode(v)
 }
 
-// broadcastOpen empuja una ruta a todos los clientes SSE suscritos a /openevents.
-func broadcastOpen(path string) {
-	openSubsMu.Lock()
-	defer openSubsMu.Unlock()
-	pendingOpen = path
-	for ch := range openSubs {
+// broadcastBus empuja un mensaje ("open\truta" / "change\truta") a todos los suscriptos al bus.
+func broadcastBus(msg string) {
+	busSubsMu.Lock()
+	defer busSubsMu.Unlock()
+	for ch := range busSubs {
 		select {
-		case ch <- path:
+		case ch <- msg:
 		default:
 		}
 	}
+}
+
+// broadcastOpen pide a la página abrir una ruta (handoff del daemon) y la recuerda para el replay
+// de reconexión del bus.
+func broadcastOpen(path string) {
+	busSubsMu.Lock()
+	pendingOpen = path
+	busSubsMu.Unlock()
+	broadcastBus("open\t" + path)
 }
 
 // dumpRender (modo --dump): imprime metadatos + el principio del HTML resaltado de un archivo, para
