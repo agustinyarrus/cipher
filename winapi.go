@@ -95,13 +95,15 @@ type comdlgFilterSpec struct {
 	spec uintptr
 }
 
-// pickCode abre el dialogo nativo "Abrir" (default: todos los archivos) y devuelve la ruta absoluta
-// elegida (o "" si se cancela). Debe correr en el hilo de UI (STA que ya inicializo WebView2).
-func pickCode(owner uintptr) string {
+// pickCode abre el dialogo nativo "Abrir" (default: todos los archivos, multi-seleccion: cada
+// archivo elegido termina en su pestaña) y devuelve las rutas absolutas elegidas (nil si se
+// cancela). Debe correr en el hilo de UI (STA que ya inicializo WebView2).
+func pickCode(owner uintptr) []string {
 	const (
 		coinitApartment = 0x2
 		clsctxInproc    = 0x1
 		fosForceFS      = 0x40       // FOS_FORCEFILESYSTEM
+		fosAllowMulti   = 0x200      // FOS_ALLOWMULTISELECT
 		sigdnFilePath   = 0x80058000 // SIGDN_FILESYSPATH
 
 		mShow         = 3  // IModalWindow::Show
@@ -109,8 +111,10 @@ func pickCode(owner uintptr) string {
 		mSetOptions   = 9  // IFileDialog::SetOptions
 		mGetOptions   = 10 // IFileDialog::GetOptions
 		mSetTitle     = 17 // IFileDialog::SetTitle
-		mGetResult    = 20 // IFileDialog::GetResult
+		mGetResults   = 27 // IFileOpenDialog::GetResults
 		mGetDispName  = 5  // IShellItem::GetDisplayName
+		mArrGetCount  = 7  // IShellItemArray::GetCount
+		mArrGetItemAt = 8  // IShellItemArray::GetItemAt
 	)
 
 	hr := comInit(coinitApartment)
@@ -124,38 +128,47 @@ func pickCode(owner uintptr) string {
 		uintptr(unsafe.Pointer(clsidFileOpenDialog)), 0, clsctxInproc,
 		uintptr(unsafe.Pointer(iidFileOpenDialog)), uintptr(unsafe.Pointer(&dlg)))
 	if int32(r) < 0 || dlg == 0 {
-		return ""
+		return nil
 	}
 	defer comRelease(dlg)
 
 	var opts uint32
 	comCall(dlg, mGetOptions, uintptr(unsafe.Pointer(&opts)))
-	comCall(dlg, mSetOptions, uintptr(opts|fosForceFS))
+	comCall(dlg, mSetOptions, uintptr(opts|fosForceFS|fosAllowMulti))
 
 	specs := []comdlgFilterSpec{
 		{utf16Ptr("Todos los archivos"), utf16Ptr("*.*")},
 		{utf16Ptr("Código"), utf16Ptr(CodeGlob())},
 	}
 	comCall(dlg, mSetFileTypes, uintptr(len(specs)), uintptr(unsafe.Pointer(&specs[0])))
-	comCall(dlg, mSetTitle, utf16Ptr("Abrir archivo"))
+	comCall(dlg, mSetTitle, utf16Ptr("Abrir archivos"))
 
 	if comCall(dlg, mShow, owner) < 0 {
-		return "" // cancelado por el usuario
+		return nil // cancelado por el usuario
 	}
 
-	var item uintptr
-	if comCall(dlg, mGetResult, uintptr(unsafe.Pointer(&item))) < 0 || item == 0 {
-		return ""
+	var arr uintptr
+	if comCall(dlg, mGetResults, uintptr(unsafe.Pointer(&arr))) < 0 || arr == 0 {
+		return nil
 	}
-	defer comRelease(item)
+	defer comRelease(arr)
 
-	var psz uintptr
-	if comCall(item, mGetDispName, sigdnFilePath, uintptr(unsafe.Pointer(&psz))) < 0 || psz == 0 {
-		return ""
+	var n uint32
+	comCall(arr, mArrGetCount, uintptr(unsafe.Pointer(&n)))
+	var paths []string
+	for i := uint32(0); i < n; i++ {
+		var item uintptr
+		if comCall(arr, mArrGetItemAt, uintptr(i), uintptr(unsafe.Pointer(&item))) < 0 || item == 0 {
+			continue
+		}
+		var psz uintptr
+		if comCall(item, mGetDispName, sigdnFilePath, uintptr(unsafe.Pointer(&psz))) >= 0 && psz != 0 {
+			paths = append(paths, utf16PtrToString(psz))
+			pCoTaskMemFree.Call(psz)
+		}
+		comRelease(item)
 	}
-	path := utf16PtrToString(psz)
-	pCoTaskMemFree.Call(psz)
-	return path
+	return paths
 }
 
 func comInit(mode uintptr) int32 {
