@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -393,7 +394,8 @@ func readLock() (port string, pid int, ok bool) {
 }
 
 // tryHandoff devuelve true si había una instancia viva que aceptó mostrar el documento.
-func tryHandoff(path string) bool {
+// hlSpec viaja junto con la ruta para que el daemon marque las mismas líneas (--hl).
+func tryHandoff(path, hlSpec string) bool {
 	port, pid, ok := readLock()
 	if !ok {
 		return false
@@ -402,12 +404,80 @@ func tryHandoff(path string) bool {
 		pAllowSetForegroundWindow.Call(uintptr(pid))
 	}
 	client := &http.Client{Timeout: 1500 * time.Millisecond}
-	resp, err := client.Get("http://127.0.0.1:" + port + "/api/show?path=" + url.QueryEscape(path))
+	resp, err := client.Get("http://127.0.0.1:" + port + "/api/show?path=" + url.QueryEscape(path) +
+		"&hl=" + url.QueryEscape(hlSpec))
 	if err != nil {
 		return false
 	}
 	resp.Body.Close()
 	return resp.StatusCode == http.StatusOK
+}
+
+// ---- líneas marcadas (--hl) --------------------------------------------
+// Spec por archivo: "12-15,40,60-72". La guarda el server (CLI inicial o /api/show del handoff) y
+// /render la devuelve parseada; abrir el mismo archivo SIN --hl la limpia (spec vacía = sin marcas).
+
+var (
+	hlMu    sync.Mutex
+	hlSpecs = map[string]string{}
+)
+
+func setHL(path, spec string) {
+	hlMu.Lock()
+	defer hlMu.Unlock()
+	if strings.TrimSpace(spec) == "" {
+		delete(hlSpecs, path)
+		return
+	}
+	hlSpecs[path] = spec
+}
+
+func getHL(path string) string {
+	hlMu.Lock()
+	defer hlMu.Unlock()
+	return hlSpecs[path]
+}
+
+// parseHLSpec convierte "12-15,40,7-9" en pares [ini,fin] 1-based, ordenados y con solapados
+// fusionados. Entradas inválidas se ignoran en silencio (la spec viene de línea de comandos).
+func parseHLSpec(spec string) [][2]int {
+	out := [][2]int{}
+	for _, part := range strings.Split(spec, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		a, b := 0, 0
+		if i := strings.IndexByte(part, '-'); i > 0 {
+			a, _ = strconv.Atoi(strings.TrimSpace(part[:i]))
+			b, _ = strconv.Atoi(strings.TrimSpace(part[i+1:]))
+		} else {
+			a, _ = strconv.Atoi(part)
+			b = a
+		}
+		if a < 1 && b >= 1 {
+			a = 1
+		}
+		if a < 1 {
+			continue
+		}
+		if b < a {
+			a, b = b, a
+		}
+		out = append(out, [2]int{a, b})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i][0] < out[j][0] })
+	merged := out[:0]
+	for _, r := range out {
+		if n := len(merged); n > 0 && r[0] <= merged[n-1][1]+1 {
+			if r[1] > merged[n-1][1] {
+				merged[n-1][1] = r[1]
+			}
+			continue
+		}
+		merged = append(merged, r)
+	}
+	return merged
 }
 
 // drawSplashMark dibuja el glifo de Cipher (</>) con GDI, centrado, sobre el HDC dado.
@@ -542,14 +612,32 @@ func main() {
 		return
 	}
 
+	// argumentos: [archivo] [--hl RANGOS]. --hl marca líneas (p.ej. "12-15,40,60-72"): zonas
+	// resaltadas + salto a la primera, para señalar dónde se modificó un archivo (diffs, reviews).
 	initialPath := ""
-	if len(os.Args) > 1 && strings.TrimSpace(os.Args[1]) != "" {
-		if abs, err := filepath.Abs(os.Args[1]); err == nil {
-			initialPath = abs
+	initialHL := ""
+	cliArgs := os.Args[1:]
+	for i := 0; i < len(cliArgs); i++ {
+		a := cliArgs[i]
+		switch {
+		case a == "--hl" && i+1 < len(cliArgs):
+			i++
+			initialHL = cliArgs[i]
+		case strings.HasPrefix(a, "--hl="):
+			initialHL = strings.TrimPrefix(a, "--hl=")
+		case strings.TrimSpace(a) != "" && !strings.HasPrefix(a, "--"):
+			if initialPath == "" {
+				if abs, err := filepath.Abs(a); err == nil {
+					initialPath = abs
+				}
+			}
 		}
 	}
+	if initialPath != "" {
+		setHL(initialPath, initialHL)
+	}
 
-	if os.Getenv("CIPHER_NEW") == "" && tryHandoff(initialPath) {
+	if os.Getenv("CIPHER_NEW") == "" && tryHandoff(initialPath, initialHL) {
 		dlog("handoff a instancia existente; saliendo")
 		return
 	}
@@ -789,6 +877,8 @@ func startServer(initialPath string) string {
 			if abs, err := filepath.Abs(p); err == nil {
 				p = abs
 			}
+			// spec de líneas marcadas de ESTA invocación (vacía = limpiar las anteriores)
+			setHL(p, r.URL.Query().Get("hl"))
 		}
 		if onShow != nil {
 			onShow(p)
@@ -844,6 +934,7 @@ func startServer(initialPath string) string {
 			"name":       name,
 			"size":       fi.Size(),
 			"mtime":      fi.ModTime().UnixMilli(),
+			"hl":         parseHLSpec(getHL(p)), // zonas marcadas (--hl): pares [ini,fin] 1-based
 		})
 	})
 

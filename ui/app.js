@@ -68,8 +68,63 @@ function paint(j, opts) {
   $('capName').textContent = j.name || '';
   $('capLang').textContent = j.binary ? '' : (j.lang || '');
   fillStatus(j);
-  if (!opts.silent) { view.scrollTop = 0; updateProgress(); }
+  applyMarks(j.hl, opts);
+  if (!opts.silent && !marks.regions.length) { view.scrollTop = 0; updateProgress(); }
   window.__log('painted ' + (j.name || ''));
+}
+
+// =========================================================================
+// Zonas marcadas (--hl): resalta rangos de líneas (dónde se modificó un archivo), salta a la
+// primera zona al abrir y permite navegar entre zonas con n/p (o click en la pill de estado).
+// =========================================================================
+const marks = { regions: [], idx: -1 }; // regions = [{els: [span.line…], from, to}]
+
+function applyMarks(hl, opts) {
+  marks.regions = []; marks.idx = -1;
+  const pill = $('stMarks');
+  const ranges = Array.isArray(hl) ? hl : [];
+  const lines = ranges.length ? code.querySelectorAll('.chroma .line') : [];
+  let total = 0;
+  for (const r of ranges) {
+    const from = r[0], to = Math.min(r[1], lines.length);
+    if (!(from >= 1 && from <= lines.length)) continue;
+    const els = [];
+    for (let n = from; n <= to; n++) { els.push(lines[n - 1]); lines[n - 1].classList.add('hl'); }
+    els[0].classList.add('hl-start');
+    els[els.length - 1].classList.add('hl-end');
+    marks.regions.push({ els, from, to });
+    total += els.length;
+  }
+  if (!marks.regions.length) { pill.textContent = ''; pill.classList.remove('on'); return; }
+  updateMarksPill(total);
+  // al abrir, llevar la vista a la primera zona (en recarga viva se conserva la posición)
+  if (!opts || !opts.silent) {
+    marks.idx = 0;
+    requestAnimationFrame(() => { focusMark(false); updateProgress(); });
+  }
+}
+function updateMarksPill(total) {
+  const n = marks.regions.length;
+  const pos = marks.idx >= 0 ? (marks.idx + 1) + '/' + n : n;
+  $('stMarks').textContent = n === 1
+    ? ('§ ' + regionLabel(marks.regions[0]))
+    : ('§ ' + pos + ' zonas' + (total ? ' · ' + total + ' líneas' : ''));
+  $('stMarks').classList.add('on');
+}
+function regionLabel(rg) { return rg.from === rg.to ? 'línea ' + rg.from : 'líneas ' + rg.from + '–' + rg.to; }
+function focusMark(smooth) {
+  const rg = marks.regions[marks.idx];
+  if (!rg) return;
+  rg.els[0].scrollIntoView({ block: 'center', behavior: smooth ? 'smooth' : 'auto' });
+  for (const el of rg.els) {
+    el.classList.remove('hl-flash'); void el.offsetWidth; el.classList.add('hl-flash');
+  }
+  updateMarksPill(marks.regions.reduce((a, r) => a + r.els.length, 0));
+}
+function gotoMark(dir) {
+  if (!marks.regions.length) return;
+  marks.idx = (marks.idx + dir + marks.regions.length) % marks.regions.length;
+  focusMark(true);
 }
 
 // ---- barra de estado ----------------------------------------------------
@@ -368,8 +423,11 @@ window.addEventListener('keydown', (e) => {
     case 'PageUp': e.preventDefault(); view.scrollBy({ top: -view.clientHeight * 0.86, behavior: 'smooth' }); break;
     case 'j': view.scrollBy({ top: 90, behavior: 'smooth' }); break;
     case 'k': view.scrollBy({ top: -90, behavior: 'smooth' }); break;
+    case 'n': e.preventDefault(); gotoMark(1); break;   // siguiente zona marcada (--hl)
+    case 'p': case 'N': e.preventDefault(); gotoMark(-1); break; // zona anterior
   }
 });
+$('stMarks').addEventListener('click', () => gotoMark(1));
 
 // =========================================================================
 // Arrastrar y soltar (cualquier archivo)

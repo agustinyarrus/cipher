@@ -169,6 +169,23 @@ body.no-doc #code{ display:none; }
 body.wrap .chroma .cl{ flex:1 1 auto; min-width:0;
   white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; }
 
+/* ---- zonas marcadas (--hl): dónde se modificó el archivo ----------------
+   Tinte crema muy suave + barra en el gutter. Todo con box-shadow inset (los bordes reales
+   moverían la grilla de líneas de 20px físicos). El .ln sticky es opaco -> lleva su propio
+   fondo tintado para que la marca no se corte al scrollear horizontal. */
+.chroma .line.hl{ background:rgba(249,226,175,.05); }
+.chroma .line.hl:hover{ background:rgba(249,226,175,.085); }
+.chroma .line.hl .ln{ color:#E8D49A; background:#151309;
+  box-shadow:inset 3px 0 0 0 rgba(249,226,175,.75); }
+.chroma .line.hl:hover .ln{ color:#f9e2af; }
+/* tapas de cada zona: hairline arriba/abajo para delimitarla sin tocar el layout */
+.chroma .line.hl-start{ box-shadow:inset 0 1px 0 rgba(249,226,175,.14); }
+.chroma .line.hl-end{ box-shadow:inset 0 -1px 0 rgba(249,226,175,.14); }
+.chroma .line.hl-start.hl-end{ box-shadow:inset 0 1px 0 rgba(249,226,175,.14), inset 0 -1px 0 rgba(249,226,175,.14); }
+/* destello al navegar entre zonas (n/p o click en la pill) */
+.chroma .line.hl-flash{ animation:hlflash 1s var(--ease); }
+@keyframes hlflash{ 0%{ background:rgba(249,226,175,.30); } 100%{ background:rgba(249,226,175,.05); } }
+
 /* fallback plano (sin lexer) y mensajes (decompilación fallida) */
 #code pre.cipher-plain,#code pre.cipher-msg{ margin:0; padding:14px 20px;
   white-space:pre-wrap; overflow-wrap:anywhere;
@@ -197,6 +214,7 @@ body.wrap .chroma .cl{ flex:1 1 auto; min-width:0;
 .st-live{ color:var(--fg); }          /* datos vivos (selección, zoom) un paso más brillantes */
 .st-pos{ min-width:32px; text-align:right; }
 .st-pill{ display:none; padding:1px 8px; border-radius:10px; font-size:10px; letter-spacing:.3px; white-space:nowrap; }
+#stMarks.on{ display:inline; color:#f9e2af; background:rgba(249,226,175,.08); border:1px solid rgba(249,226,175,.32); }
 #stDecomp.on{ display:inline; color:var(--fg); background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.22); }
 #stTrunc.on{ display:inline; color:var(--warn); background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.22); }
 body.no-doc #statusbar .st-right,body.no-doc #stPath{ opacity:0; }
