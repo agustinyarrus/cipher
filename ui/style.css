@@ -31,6 +31,10 @@ html,body{
   background:var(--bg); color:var(--fg);
   font-family:"Cascadia Code ExtraLight","Cascadia Code","Cascadia Mono",ui-monospace,"Segoe UI",sans-serif;
   font-weight:200; font-size:13px;
+  /* ExtraLight REAL en todo el árbol: si resuelve la Cascadia variable, el eje wght queda clavado en
+     200 (pisa cualquier font-weight mayor, incluso el "bold" de tokens); y sin negrita/oblicua
+     SINTÉTICAS (font-synthesis), que engordan y emborronan el trazo fino. */
+  font-variation-settings:"wght" 200; font-synthesis:none;
   -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
   -webkit-user-select:none; user-select:none; cursor:default;
 }
@@ -48,7 +52,7 @@ svg{ display:block; }
 .mark .m-chev{ fill:none; stroke:var(--fg-faint); stroke-width:8; stroke-linecap:round; stroke-linejoin:round; }
 .mark .m-slash{ stroke:var(--accent); stroke-width:8; stroke-linecap:round; }
 .wordmark{
-  font-size:11px; font-weight:300; letter-spacing:3.5px; color:var(--fg-faint);
+  font-size:11px; font-weight:200; letter-spacing:3.5px; color:var(--fg-faint);
   text-transform:lowercase; text-indent:1px;
 }
 
@@ -57,7 +61,7 @@ svg{ display:block; }
   opacity:0; transition:opacity .4s var(--ease); }
 body.has-doc .tb-center{ opacity:1; }
 .tb-center .name{ max-width:38vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-  color:#B8B8B8; font-weight:300; }
+  color:#B8B8B8; font-weight:200; }
 .tb-center .badge{ font-size:10px; color:var(--accent); background:var(--accent-soft);
   padding:1px 7px; border-radius:9px; letter-spacing:.3px; white-space:nowrap; flex:none; }
 .tb-center .badge:empty{ display:none; }
@@ -118,7 +122,7 @@ body.ready #splash{ opacity:0; visibility:hidden; pointer-events:none; }
 body.find-open #findbar{ display:flex; transform:translateY(0); opacity:1; }
 .find-ico{ stroke:var(--fg-dim); stroke-width:1.4; fill:none; stroke-linecap:round; flex:none; }
 #findInput{ width:178px; background:transparent; border:0; outline:0; color:var(--fg);
-  font-family:inherit; font-size:12.5px; font-weight:300; -webkit-user-select:text; user-select:text; }
+  font-family:inherit; font-size:12.5px; font-weight:200; -webkit-user-select:text; user-select:text; }
 #findInput::placeholder{ color:var(--fg-faint); }
 .find-count{ font-size:11px; color:var(--fg-dim); font-variant-numeric:tabular-nums; min-width:38px; text-align:right; }
 .find-nav{ width:24px; height:24px; display:grid; place-items:center; border-radius:6px;
@@ -141,9 +145,10 @@ body.wrap #code{ width:auto; }
 body.no-doc #code{ display:none; }
 
 #code .chroma{ display:block; background:transparent !important;
-  font-family:"Cascadia Code Light","Cascadia Code","Cascadia Mono",ui-monospace,monospace; font-weight:300;
-  /* Look "Notepad++": em de 16px FISICOS a 150% DPI (10.6667px logicos) con el corte Light y
-     lineas de 20px fisicos exactos (1.25). Mas chico + denso + definido; el cromo queda ExtraLight. */
+  font-family:"Cascadia Code ExtraLight","Cascadia Code","Cascadia Mono",ui-monospace,monospace; font-weight:200;
+  /* Look "Notepad++" en el corte MAS FINO que existe de Cascadia (ExtraLight 200): em de 16px FISICOS
+     a 150% DPI (10.6667px logicos) y lineas de 20px fisicos exactos (1.25) -> el trazo hairline cae
+     en pixel fisico entero: finito y definido, no borroso. Todo el app queda en ExtraLight. */
   font-size:calc(10.6667px * var(--rscale)); line-height:1.25;
   -webkit-user-select:text; user-select:text; }
 /* el <code> del navegador trae font-family:monospace (UA) y pisaria la Cascadia de .chroma -> inherit */
@@ -165,7 +170,7 @@ body.wrap .chroma .cl{ flex:1 1 auto; min-width:0;
 /* fallback plano (sin lexer) y mensajes (decompilación fallida) */
 #code pre.cipher-plain,#code pre.cipher-msg{ margin:0; padding:14px 20px;
   white-space:pre-wrap; overflow-wrap:anywhere;
-  font-family:"Cascadia Code Light","Cascadia Code","Cascadia Mono",monospace; font-weight:300; font-size:calc(10.6667px * var(--rscale));
+  font-family:"Cascadia Code ExtraLight","Cascadia Code","Cascadia Mono",monospace; font-weight:200; font-size:calc(10.6667px * var(--rscale));
   line-height:1.25; color:var(--fg); -webkit-user-select:text; user-select:text; }
 #code pre.cipher-msg{ color:var(--warn); }
 
@@ -210,7 +215,7 @@ body.has-doc #empty{ opacity:0; pointer-events:none; }
 .empty-row{ margin-bottom:30px; }
 .open-btn{ display:inline-flex; align-items:center; gap:10px; padding:8px 14px 8px 16px; border-radius:9px;
   background:var(--surface); border:1px solid var(--line); color:var(--fg);
-  font-family:inherit; font-size:12.5px; font-weight:300; letter-spacing:.4px; cursor:default;
+  font-family:inherit; font-size:12.5px; font-weight:200; letter-spacing:.4px; cursor:default;
   transition:border-color .18s, background .18s, transform .12s; }
 .open-btn:hover{ border-color:rgba(255,255,255,.35); background:#101010; }
 .open-btn:active{ transform:translateY(1px); }
@@ -218,7 +223,7 @@ body.has-doc #empty{ opacity:0; pointer-events:none; }
   background:rgba(255,255,255,.05); border:1px solid var(--line); }
 .empty-hints{ display:flex; gap:18px; font-size:11px; color:var(--fg-faint); letter-spacing:.3px;
   flex-wrap:wrap; justify-content:center; max-width:80vw; }
-.empty-hints b{ color:var(--fg-dim); font-weight:400; }
+.empty-hints b{ color:var(--fg-dim); font-weight:200; }
 
 /* arrastrando un archivo encima */
 body.dragover #view::after{ content:"Soltá para abrir"; position:absolute; inset:14px;
