@@ -982,6 +982,7 @@ func startServer(initialPaths []string) string {
 			"binary":     res.Binary,
 			"truncated":  res.Truncated,
 			"crlf":       res.CRLF,
+			"encoding":   res.Encoding,
 			"path":       p,
 			"dir":        filepath.Dir(p),
 			"name":       name,
@@ -1016,7 +1017,8 @@ func startServer(initialPaths []string) string {
 		writeJSON(wr, map[string]any{
 			"ok": true, "html": res.HTML, "lang": res.Lang, "lines": res.Lines,
 			"bytes": res.Bytes, "chars": res.Chars, "binary": res.Binary, "truncated": res.Truncated,
-			"crlf": res.CRLF, "path": "", "dir": "", "name": filepath.Base(name),
+			"crlf": res.CRLF, "encoding": res.Encoding, "path": "", "dir": "",
+			"name": filepath.Base(name),
 		})
 	})
 
@@ -1206,8 +1208,9 @@ func dumpRender(path string) {
 		fmt.Println("ERR", err)
 		return
 	}
-	fmt.Printf("lang=%q lines=%d bytes=%d decompiled=%v tool=%q binary=%v truncated=%v crlf=%v\n",
-		res.Lang, res.Lines, res.Bytes, res.Decompiled, res.Tool, res.Binary, res.Truncated, res.CRLF)
+	fmt.Printf("lang=%q lines=%d bytes=%d decompiled=%v tool=%q binary=%v truncated=%v crlf=%v enc=%q\n",
+		res.Lang, res.Lines, res.Bytes, res.Decompiled, res.Tool, res.Binary, res.Truncated,
+		res.CRLF, res.Encoding)
 	h := res.HTML
 	if len(h) > 3000 {
 		h = h[:3000]

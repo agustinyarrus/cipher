@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"github.com/alecthomas/chroma/v2"
@@ -104,6 +105,39 @@ type RenderResult struct {
 	Binary     bool   `json:"binary"`     // true si el archivo es binario y no se pudo mostrar
 	Truncated  bool   `json:"truncated"`  // true si se recortó por tamaño
 	CRLF       bool   `json:"crlf"`       // saltos de línea CRLF (Windows) vs LF
+	Encoding   string `json:"encoding"`   // "" = UTF-8; si no, "UTF-8 BOM" / "UTF-16 LE" / "UTF-16 BE"
+}
+
+// decodeText normaliza la entrada a UTF-8 sin BOM y dice con qué se encontró.
+//
+// Hace falta de verdad en Windows: un .reg exportado por regedit, un .ps1 guardado por el ISE o
+// un .txt del Bloc de notas suelen venir en UTF-16 LE. Sin esto, isBinary ve los bytes NUL de cada
+// caracter ASCII y declara binario un archivo de texto perfectamente legible.
+func decodeText(src []byte) ([]byte, string) {
+	switch {
+	case len(src) >= 3 && src[0] == 0xEF && src[1] == 0xBB && src[2] == 0xBF:
+		return src[3:], "UTF-8 BOM"
+	case len(src) >= 2 && src[0] == 0xFF && src[1] == 0xFE:
+		return utf16ToUTF8(src[2:], false), "UTF-16 LE"
+	case len(src) >= 2 && src[0] == 0xFE && src[1] == 0xFF:
+		return utf16ToUTF8(src[2:], true), "UTF-16 BE"
+	}
+	return src, ""
+}
+
+func utf16ToUTF8(b []byte, bigEndian bool) []byte {
+	if len(b)%2 == 1 {
+		b = b[:len(b)-1]
+	}
+	u := make([]uint16, len(b)/2)
+	for i := range u {
+		if bigEndian {
+			u[i] = uint16(b[i*2])<<8 | uint16(b[i*2+1])
+		} else {
+			u[i] = uint16(b[i*2+1])<<8 | uint16(b[i*2])
+		}
+	}
+	return []byte(string(utf16.Decode(u)))
 }
 
 // ---- formateador chroma -------------------------------------------------
@@ -142,6 +176,7 @@ func RenderFile(path, name string, src []byte) (RenderResult, error) {
 	}
 
 	// 2) archivo de texto / binario
+	src, enc := decodeText(src)
 	if isBinary(src) {
 		return RenderResult{Binary: true, Bytes: len(src)}, nil
 	}
@@ -153,12 +188,14 @@ func RenderFile(path, name string, src []byte) (RenderResult, error) {
 	res := highlight(string(src), name)
 	res.Truncated = truncated
 	res.CRLF = bytes.Contains(src, []byte("\r\n"))
+	res.Encoding = enc
 	return res, nil
 }
 
 // RenderText resalta texto crudo (arrastrar-y-soltar, sin ruta en disco). El nombre da la pista
 // de lenguaje.
 func RenderText(src []byte, name string) (RenderResult, error) {
+	src, enc := decodeText(src)
 	if isBinary(src) {
 		return RenderResult{Binary: true, Bytes: len(src)}, nil
 	}
@@ -170,6 +207,7 @@ func RenderText(src []byte, name string) (RenderResult, error) {
 	res := highlight(string(src), name)
 	res.Truncated = truncated
 	res.CRLF = bytes.Contains(src, []byte("\r\n"))
+	res.Encoding = enc
 	return res, nil
 }
 
