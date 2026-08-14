@@ -297,7 +297,10 @@ function fillStatus(j) {
   $('stLines').textContent = j.binary ? '' : ((j.lines || 0) + (j.lines === 1 ? ' línea' : ' líneas'));
   $('stChars').textContent = (j.binary || j.chars == null) ? '' : nf.format(j.chars) + ' carac.';
   $('stSize').textContent = humanSize(j.binary ? j.bytes : (j.size != null ? j.size : j.bytes));
-  $('stEol').textContent = j.binary ? '' : (j.crlf ? 'CRLF' : 'LF');
+  // codificación + fin de línea. La codificación sólo se muestra si NO es UTF-8 a secas
+  // (un .reg de regedit, por ejemplo, viene en UTF-16 LE).
+  $('stEol').textContent = j.binary ? ''
+    : (j.encoding ? j.encoding + ' · ' : '') + (j.crlf ? 'CRLF' : 'LF');
   $('stMod').textContent = j.mtime ? 'mod ' + fmtWhen(j.mtime) : '';
   $('stSel').textContent = '';
 }
