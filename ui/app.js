@@ -500,9 +500,39 @@ $('findClose').addEventListener('click', closeFind);
 let rscale = (typeof window.__CIPHER_RSCALE__ === 'number' && window.__CIPHER_RSCALE__ > 0) ? window.__CIPHER_RSCALE__ : 1;
 let wrap = window.__CIPHER_WRAP__ === true;
 
+// ---- escala tipografica --------------------------------------------------------------------
+// El cuerpo del codigo se eligio para caer en 16 px FISICOS exactos a 150 % de DPI, pero eso vale
+// solo a zoom 1: apenas se toca el zoom, el tamaño cae en pixeles fraccionarios y el trazo
+// hairline de la ExtraLight se ablanda. Aca se recalcula para que SIEMPRE aterrice en la grilla
+// fisica, y el interlineado tambien: si el renglon mide 18,6 px reales, cada linea apoya en un
+// subpixel distinto y el bloque va cambiando de nitidez de arriba a abajo.
+
+const PT = 0.75;             // 1 px CSS = 0,75 pt
+const PISO_PX = 5 / PT;      // piso de 5 pt
+const BASE_PX = 10.6667;     // em de 16 px FISICOS a 150 % (el cuerpo del look Notepad++)
+const LH = 1.25;             // 20 px fisicos exactos a zoom 1
+const CROMO = [10, 11, 11.5, 12, 12.5, 13, 14];
+
+// La ExtraLight (200) es el corte mas fino que existe y es el que queremos SIEMPRE. Solo se
+// rescata cuando el tamaño final ya no da para dibujarla: por debajo de ~6 pt el trazo mide menos
+// de un pixel y, por mas subpixel que haya, sale gris sucio en vez de fino. Ahi, y solo ahi, sube
+// un escalon a Light. De 0,8 de zoom para arriba nunca se toca.
+const pesoCodigo = (px) => (px * PT < 6 ? 300 : 200);
+
 function applyScale() {
   rscale = Math.min(2.2, Math.max(0.6, rscale));
-  document.documentElement.style.setProperty('--rscale', rscale.toFixed(3));
+  const dpr = window.devicePixelRatio || 1;
+  const alPixel = (px) => Math.max(1, Math.round(Math.max(px, PISO_PX) * dpr)) / dpr;
+  const raiz = document.documentElement.style;
+
+  raiz.setProperty('--rscale', rscale.toFixed(3));
+
+  const fs = alPixel(BASE_PX * rscale);
+  raiz.setProperty('--fs-code', fs.toFixed(4) + 'px');
+  raiz.setProperty('--lh-code', (Math.max(1, Math.round(fs * LH * dpr)) / dpr).toFixed(4) + 'px');
+  raiz.setProperty('--w-code', String(pesoCodigo(fs)));
+  for (const px of CROMO) raiz.setProperty('--px-' + String(px).replace('.', '_'), alPixel(px).toFixed(4) + 'px');
+
   // indicador de zoom en la barra de estado (sólo cuando no está al 100%)
   $('stZoom').textContent = Math.abs(rscale - 1) < 0.005 ? '' : Math.round(rscale * 100) + '%';
 }

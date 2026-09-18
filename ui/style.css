@@ -22,6 +22,21 @@
   --tb-h: 38px;
   --status-h: 25px;
   --rscale: 1;            /* zoom del código (Ctrl +/-) */
+
+  /* ------------------------------------------------------------------ *
+   * Tipografia. Los valores de verdad los calcula applyScale() en       *
+   * app.js, que hace dos cosas que el CSS solo no puede: redondear al   *
+   * pixel FISICO (necesita el DPI del monitor) y decidir si el tamaño   *
+   * final todavia da para dibujar la ExtraLight. Esto de aca abajo es   *
+   * el arranque y la red por si el JS no llega a correr.                *
+   * ------------------------------------------------------------------ */
+  --fs-code: calc(10.6667px * var(--rscale));
+  --lh-code: 1.25;
+  --w-code:  200;
+
+  /* Medidas fijas del cromo, tambien redondeadas al pixel fisico. */
+  --px-10:   10px;   --px-11:   11px;   --px-11_5: 11.5px; --px-12: 12px;
+  --px-12_5: 12.5px; --px-13:   13px;   --px-14:   14px;
 }
 
 *{ margin:0; padding:0; box-sizing:border-box; }
@@ -37,7 +52,11 @@ html,body{
      200 (pisa cualquier font-weight mayor, incluso el "bold" de tokens); y sin negrita/oblicua
      SINTÉTICAS (font-synthesis), que engordan y emborronan el trazo fino. */
   font-variation-settings:"wght" 200; font-synthesis:none;
-  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+  /* Sin -webkit-font-smoothing:antialiased. Medido en este WebView2 no cambia un solo pixel
+     (es propiedad de macOS), pero en Blink quiere decir "pasame a antialiasing gris", que es
+     justo lo contrario de lo que queremos: el trazo hairline de la ExtraLight vive del
+     subpixel. La dejamos afuera para que no sea una mina el dia que la implementen. */
+  text-rendering:optimizeLegibility;
   -webkit-user-select:none; user-select:none; cursor:default;
 }
 svg{ display:block; }
@@ -54,17 +73,17 @@ svg{ display:block; }
 .mark .m-chev{ fill:none; stroke:var(--fg-faint); stroke-width:8; stroke-linecap:round; stroke-linejoin:round; }
 .mark .m-slash{ stroke:var(--accent); stroke-width:8; stroke-linecap:round; }
 .wordmark{
-  font-size:11px; font-weight:200; letter-spacing:3.5px; color:var(--fg-faint);
+  font-size:var(--px-11); font-weight:200; letter-spacing:3.5px; color:var(--fg-faint);
   text-transform:lowercase; text-indent:1px;
 }
 
 .tb-center{ display:flex; align-items:center; justify-content:center; gap:8px; min-width:0;
-  font-size:12px; color:var(--fg-dim); letter-spacing:.2px;
+  font-size:var(--px-12); color:var(--fg-dim); letter-spacing:.2px;
   opacity:0; transition:opacity .4s var(--ease); }
 body.has-doc .tb-center{ opacity:1; }
 .tb-center .name{ max-width:38vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   color:#B8B8B8; font-weight:200; }
-.tb-center .badge{ font-size:10px; color:var(--accent); background:var(--accent-soft);
+.tb-center .badge{ font-size:var(--px-10); color:var(--accent); background:var(--accent-soft);
   padding:1px 7px; border-radius:9px; letter-spacing:.3px; white-space:nowrap; flex:none; }
 .tb-center .badge:empty{ display:none; }
 .tb-center .live{ width:6px; height:6px; border-radius:50%; background:var(--green);
@@ -102,7 +121,7 @@ body.tabs-on #tabs{ display:flex; }
 
 .tab{ position:relative; display:flex; align-items:center; flex:0 1 auto; min-width:76px; max-width:188px;
   height:26px; padding:0 5px 0 14px; border-radius:7px; border:1px solid transparent;
-  font-size:11.5px; letter-spacing:.2px; color:var(--fg-dim); white-space:nowrap;
+  font-size:var(--px-11_5); letter-spacing:.2px; color:var(--fg-dim); white-space:nowrap;
   transition:background .14s ease, color .14s ease, border-color .14s ease;
   animation:tabIn .18s var(--ease); }
 .tab:hover{ background:rgba(255,255,255,.04); color:#C6C6C6; }
@@ -165,9 +184,9 @@ body.ready #splash{ opacity:0; visibility:hidden; pointer-events:none; }
 body.find-open #findbar{ display:flex; transform:translateY(0); opacity:1; }
 .find-ico{ stroke:var(--fg-dim); stroke-width:1.4; fill:none; stroke-linecap:round; flex:none; }
 #findInput{ width:178px; background:transparent; border:0; outline:0; color:var(--fg);
-  font-family:inherit; font-size:12.5px; font-weight:200; -webkit-user-select:text; user-select:text; }
+  font-family:inherit; font-size:var(--px-12_5); font-weight:200; -webkit-user-select:text; user-select:text; }
 #findInput::placeholder{ color:var(--fg-faint); }
-.find-count{ font-size:11px; color:var(--fg-dim); font-variant-numeric:tabular-nums; min-width:38px; text-align:right; }
+.find-count{ font-size:var(--px-11); color:var(--fg-dim); font-variant-numeric:tabular-nums; min-width:38px; text-align:right; }
 .find-nav{ width:24px; height:24px; display:grid; place-items:center; border-radius:6px;
   background:transparent; border:0; cursor:default; color:var(--fg-dim);
   transition:background .14s, color .14s; }
@@ -197,7 +216,11 @@ body.wrap #code > .doc{ width:auto; }
   /* Look "Notepad++" en el corte MAS FINO que existe de Cascadia (ExtraLight 200): em de 16px FISICOS
      a 150% DPI (10.6667px logicos) y lineas de 20px fisicos exactos (1.25) -> el trazo hairline cae
      en pixel fisico entero: finito y definido, no borroso. Todo el app queda en ExtraLight. */
-  font-size:calc(10.6667px * var(--rscale)); line-height:1.25;
+  /* Cuerpo E INTERLINEADO en pixeles fisicos ENTEROS, en todo el rango de zoom. El interlineado
+     importa tanto como el cuerpo: si cae fraccionario, cada renglon apoya en un subpixel
+     distinto y el bloque entero va cambiando de nitidez linea por linea. */
+  font-size:var(--fs-code); line-height:var(--lh-code);
+  font-weight:var(--w-code); font-variation-settings:"wght" var(--w-code);
   -webkit-user-select:text; user-select:text; }
 /* el <code> del navegador trae font-family:monospace (UA) y pisaria la Cascadia de .chroma -> inherit */
 #code .chroma code{ display:block; font-family:inherit; }
@@ -241,22 +264,24 @@ body.wrap .chroma .cl{ flex:1 1 auto; min-width:0;
 /* fallback plano (sin lexer) y mensajes (decompilación fallida) */
 #code pre.cipher-plain,#code pre.cipher-msg{ margin:0; padding:14px 20px;
   white-space:pre-wrap; overflow-wrap:anywhere;
-  font-family:"Cascadia Code","Cascadia Code ExtraLight","Cascadia Mono",monospace; font-weight:200; font-size:calc(10.6667px * var(--rscale));
-  line-height:1.25; color:var(--fg); -webkit-user-select:text; user-select:text; }
+  font-family:"Cascadia Code","Cascadia Code ExtraLight","Cascadia Mono",monospace;
+  font-size:var(--fs-code); line-height:var(--lh-code);
+  font-weight:var(--w-code); font-variation-settings:"wght" var(--w-code);
+  color:var(--fg); -webkit-user-select:text; user-select:text; }
 #code pre.cipher-msg{ color:var(--warn); }
 
 /* aviso central (archivo binario / vacío) */
 .notice{ position:absolute; inset:0; display:flex;
   flex-direction:column; align-items:center; justify-content:center; gap:10px;
-  color:var(--fg-dim); font-size:13px; letter-spacing:.3px; pointer-events:none; }
+  color:var(--fg-dim); font-size:var(--px-13); letter-spacing:.3px; pointer-events:none; }
 .notice .notice-ico{ color:var(--fg-faint); }
-.notice .notice-sub{ font-size:11.5px; color:var(--fg-faint); }
+.notice .notice-sub{ font-size:var(--px-11_5); color:var(--fg-faint); }
 
 /* ============================ barra de estado ============================ */
 #statusbar{ position:fixed; bottom:0; left:0; right:0; height:var(--status-h);
   display:flex; align-items:center; justify-content:space-between; gap:14px; padding:0 12px;
   background:var(--surface); border-top:1px solid var(--line-soft); z-index:60;
-  font-size:11px; color:var(--fg-dim); }
+  font-size:var(--px-11); color:var(--fg-dim); }
 .st-left{ min-width:0; flex:1; overflow:hidden; }
 #stPath{ display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   color:var(--fg-faint); direction:rtl; text-align:left; }
@@ -265,7 +290,7 @@ body.wrap .chroma .cl{ flex:1 1 auto; min-width:0;
 .st-item:empty{ display:none; }
 .st-live{ color:var(--fg); }          /* datos vivos (selección, zoom) un paso más brillantes */
 .st-pos{ min-width:32px; text-align:right; }
-.st-pill{ display:none; padding:1px 8px; border-radius:10px; font-size:10px; letter-spacing:.3px; white-space:nowrap; }
+.st-pill{ display:none; padding:1px 8px; border-radius:10px; font-size:var(--px-10); letter-spacing:.3px; white-space:nowrap; }
 #stMarks.on{ display:inline; color:var(--fg); background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.22); }
 #stMarks .mk-0{ color:#f9e2af; }  /* modificado */
 #stMarks .mk-1{ color:#a6e3a1; }  /* agregado   */
@@ -285,24 +310,24 @@ body.has-doc #empty{ opacity:0; pointer-events:none; }
 .empty-mark .e-chev{ fill:none; stroke:var(--fg-faint); stroke-width:7; stroke-linecap:round; stroke-linejoin:round; }
 .empty-mark .e-slash{ stroke:var(--accent); stroke-width:7; stroke-linecap:round;
   filter:drop-shadow(0 0 6px rgba(255,255,255,.35)); }
-.empty-title{ font-size:14px; color:var(--fg-dim); letter-spacing:.3px; margin-bottom:7px; }
-.empty-sub{ font-size:11.5px; color:var(--fg-faint); letter-spacing:.4px; margin-bottom:26px; }
+.empty-title{ font-size:var(--px-14); color:var(--fg-dim); letter-spacing:.3px; margin-bottom:7px; }
+.empty-sub{ font-size:var(--px-11_5); color:var(--fg-faint); letter-spacing:.4px; margin-bottom:26px; }
 .empty-row{ margin-bottom:30px; }
 .open-btn{ display:inline-flex; align-items:center; gap:10px; padding:8px 14px 8px 16px; border-radius:9px;
   background:var(--surface); border:1px solid var(--line); color:var(--fg);
-  font-family:inherit; font-size:12.5px; font-weight:200; letter-spacing:.4px; cursor:default;
+  font-family:inherit; font-size:var(--px-12_5); font-weight:200; letter-spacing:.4px; cursor:default;
   transition:border-color .18s, background .18s, transform .12s; }
 .open-btn:hover{ border-color:rgba(255,255,255,.35); background:#101010; }
 .open-btn:active{ transform:translateY(1px); }
-.kbd{ font-size:10px; color:var(--fg-dim); letter-spacing:1px; padding:2px 6px; border-radius:5px;
+.kbd{ font-size:var(--px-10); color:var(--fg-dim); letter-spacing:1px; padding:2px 6px; border-radius:5px;
   background:rgba(255,255,255,.05); border:1px solid var(--line); }
-.empty-hints{ display:flex; gap:18px; font-size:11px; color:var(--fg-faint); letter-spacing:.3px;
+.empty-hints{ display:flex; gap:18px; font-size:var(--px-11); color:var(--fg-faint); letter-spacing:.3px;
   flex-wrap:wrap; justify-content:center; max-width:80vw; }
 .empty-hints b{ color:var(--fg-dim); font-weight:200; }
 
 /* arrastrando un archivo encima */
 body.dragover #view::after{ content:"Soltá para abrir"; position:absolute; inset:14px;
-  display:flex; align-items:center; justify-content:center; z-index:30; font-size:13px; color:var(--accent);
+  display:flex; align-items:center; justify-content:center; z-index:30; font-size:var(--px-13); color:var(--accent);
   border:1.5px dashed rgba(255,255,255,.45); border-radius:14px; background:rgba(255,255,255,.05);
   backdrop-filter:blur(2px); }
 
@@ -310,7 +335,7 @@ body.dragover #view::after{ content:"Soltá para abrir"; position:absolute; inse
 #toast{ position:absolute; left:50%; top:14px; transform:translateX(-50%) translateY(-8px);
   padding:7px 14px; border-radius:8px; z-index:40;
   background:rgba(229,72,77,.13); border:1px solid rgba(229,72,77,.30); color:#F1A6A9;
-  font-size:11.5px; letter-spacing:.3px; opacity:0; transition:opacity .25s, transform .25s; pointer-events:none; }
+  font-size:var(--px-11_5); letter-spacing:.3px; opacity:0; transition:opacity .25s, transform .25s; pointer-events:none; }
 #toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
 #toast.ok{ background:rgba(88,167,107,.13); border-color:rgba(88,167,107,.30); color:#ABD8B8; }
 
