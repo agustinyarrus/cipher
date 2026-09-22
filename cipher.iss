@@ -1,6 +1,6 @@
 ; Cipher — instalador (Inno Setup 6). Compilar: ISCC cipher.iss  ->  dist\Cipher-Setup-x.y.z.exe
 #define AppName    "Cipher"
-#define AppVer     "1.0.0"
+#define AppVer     "1.1.0"
 #define AppExe     "cipher.exe"
 #define AppPub     "Agustin Yarrus"
 #define AppUrl     "https://github.com/agustinyarrus/cipher"

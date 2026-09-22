@@ -23,7 +23,7 @@ if (-not $isAdmin) {
 
 # ---- constantes ----
 $appName    = 'Cipher'
-$version    = '1.0.0'
+$version    = '1.1.0'
 $publisher  = 'Agustin Yarrus'
 $installDir = Join-Path $env:ProgramFiles 'Cipher'
 $exe        = Join-Path $installDir 'cipher.exe'
