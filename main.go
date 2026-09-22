@@ -62,6 +62,8 @@ const (
 	smYVIRTUALSCREEN  = 77
 	smCXVIRTUALSCREEN = 78
 	smCYVIRTUALSCREEN = 79
+	smCMONITORS       = 80
+	spiGETWORKAREA    = 0x0030
 	htCAPTION         = 2
 	htLEFT            = 10
 	htRIGHT           = 11
@@ -108,6 +110,7 @@ var (
 	pPostMessageW             = user32.NewProc("PostMessageW")
 	pReleaseCapture           = user32.NewProc("ReleaseCapture")
 	pGetSystemMetrics         = user32.NewProc("GetSystemMetrics")
+	pSystemParametersInfoW    = user32.NewProc("SystemParametersInfoW")
 	pGetWindowPlacement       = user32.NewProc("GetWindowPlacement")
 	pSetForegroundWindow      = user32.NewProc("SetForegroundWindow")
 	pGetClientRect            = user32.NewProc("GetClientRect")
@@ -139,9 +142,9 @@ var (
 	pendingOpen string // última ruta pedida; se reenvía a cada cliente que (re)conecta al bus
 
 	// lista de vigilancia declarativa: la página la repone entera en cada cambio de pestañas
-	// (/api/watch) y UN goroutine la pollea; cambió el mtime -> "change" por el bus.
+	// (/api/watch) y UN goroutine la pollea; cambió -> "change" por el bus; desapareció -> "gone".
 	watchMu  sync.Mutex
-	watchSet = map[string]time.Time{}
+	watchSet = map[string]fileStamp{}
 
 	darkBrush  uintptr
 	subclassCB uintptr // callback de subclassProc; lo instala el CBT hook al crearse la ventana
@@ -178,6 +181,32 @@ type windowPlacement struct {
 func sysMetric(i int) int32 {
 	r, _, _ := pGetSystemMetrics.Call(uintptr(i))
 	return int32(r)
+}
+
+// workArea devuelve el área de trabajo del monitor primario en px físicos (bajo Per-Monitor-DPI-v2),
+// excluyendo la barra de tareas. Fallback a la pantalla completa si SPI_GETWORKAREA no responde.
+func workArea() rect {
+	var rc rect
+	r, _, _ := pSystemParametersInfoW.Call(uintptr(spiGETWORKAREA), 0, uintptr(unsafe.Pointer(&rc)), 0)
+	if r == 0 || rc.right-rc.left <= 0 || rc.bottom-rc.top <= 0 {
+		return rect{0, 0, sysMetric(smCXSCREEN), sysMetric(smCYSCREEN)}
+	}
+	return rc
+}
+
+// clampWinSize recorta el tamaño (px físicos) para que nunca supere el área de trabajo del monitor
+// primario. Sin esto, una geometría guardada mayor que la pantalla (snap, arrastre del borde más
+// allá del monitor, o haber cerrado maximizada) reabría la ventana con los bordes de redimensión
+// fuera de vista -> imposible de agarrar para reajustarla.
+func clampWinSize(w, h uint) (uint, uint) {
+	wa := workArea()
+	if mw := uint(wa.right - wa.left); mw > 0 && w > mw {
+		w = mw
+	}
+	if mh := uint(wa.bottom - wa.top); mh > 0 && h > mh {
+		h = mh
+	}
+	return w, h
 }
 
 type createstructW struct {
@@ -333,23 +362,33 @@ func targetWindowPos(ww, hh int32) (x, y int32, maximized bool) {
 		sw, sh := sysMetric(smCXSCREEN), sysMetric(smCYSCREEN)
 		x, y = (sw-ww)/2, (sh-hh)/2
 	}
-	vx, vy := sysMetric(smXVIRTUALSCREEN), sysMetric(smYVIRTUALSCREEN)
-	vw, vh := sysMetric(smCXVIRTUALSCREEN), sysMetric(smCYVIRTUALSCREEN)
-	if vw <= 0 || vh <= 0 { // fallback si el virtual screen no responde
-		vx, vy = 0, 0
-		vw, vh = sysMetric(smCXSCREEN), sysMetric(smCYSCREEN)
+	// Límites de clamp: con UN monitor usamos su área de trabajo (deja la ventana entera SOBRE la
+	// barra de tareas, con TODOS los bordes de redimensión alcanzables). Con varios usamos el
+	// escritorio virtual completo, para no impedir colocarla en un monitor secundario (x/y < 0 ok).
+	var bx, by, bw, bh int32
+	if sysMetric(smCMONITORS) <= 1 {
+		wa := workArea()
+		bx, by, bw, bh = wa.left, wa.top, wa.right-wa.left, wa.bottom-wa.top
+	} else {
+		bx, by = sysMetric(smXVIRTUALSCREEN), sysMetric(smYVIRTUALSCREEN)
+		bw, bh = sysMetric(smCXVIRTUALSCREEN), sysMetric(smCYVIRTUALSCREEN)
+		if bw <= 0 || bh <= 0 { // fallback si el escritorio virtual no responde
+			bx, by, bw, bh = 0, 0, sysMetric(smCXSCREEN), sysMetric(smCYSCREEN)
+		}
 	}
-	if x > vx+vw-120 {
-		x = vx + vw - 120
+	// Primero que los bordes derecho/inferior no se salgan; luego que la esquina sup-izq no quede
+	// fuera (tiene prioridad). Con el tamaño ya acotado (clampWinSize), la ventana entra entera.
+	if x+ww > bx+bw {
+		x = bx + bw - ww
 	}
-	if y > vy+vh-80 {
-		y = vy + vh - 80
+	if y+hh > by+bh {
+		y = by + bh - hh
 	}
-	if x < vx {
-		x = vx
+	if x < bx {
+		x = bx
 	}
-	if y < vy {
-		y = vy
+	if y < by {
+		y = by
 	}
 	return
 }
@@ -486,13 +525,17 @@ func parseHLSpec(spec string) [][3]int {
 		if part == "" {
 			continue
 		}
-		a, b := 0, 0
+		var a, b int
+		var errA, errB error
 		if i := strings.IndexByte(part, '-'); i > 0 {
-			a, _ = strconv.Atoi(strings.TrimSpace(part[:i]))
-			b, _ = strconv.Atoi(strings.TrimSpace(part[i+1:]))
+			a, errA = strconv.Atoi(strings.TrimSpace(part[:i]))
+			b, errB = strconv.Atoi(strings.TrimSpace(part[i+1:]))
 		} else {
-			a, _ = strconv.Atoi(part)
+			a, errA = strconv.Atoi(part)
 			b = a
+		}
+		if errA != nil || errB != nil { // "5-x": antes el fin invalido valia 0 y quedaba el rango 0-5
+			continue
 		}
 		if a < 1 && b >= 1 {
 			a = 1
@@ -729,9 +772,15 @@ func main() {
 	winW, winH := uint(1180*scale), uint(840*scale)
 	centerWin := true
 	if g := gCfg.Window; g != nil && g.W > 200 && g.H > 150 {
-		winW, winH = uint(g.W), uint(g.H)
 		centerWin = false
+		if !g.Max {
+			winW, winH = uint(g.W), uint(g.H)
+		}
+		// Si se cerró maximizada queda el tamaño default como "restaurado": el rect guardado es el
+		// del estado maximizado (más grande que el área de trabajo) y al des-maximizar la ventana
+		// quedaba con los bordes fuera de la pantalla. showWin la vuelve a maximizar al revelarla.
 	}
+	winW, winH = clampWinSize(winW, winH)
 	// Posición definitiva ANTES de crear: cbtProc la clava en el CREATESTRUCT para que la ventana
 	// nazca ahí. (Center sigue como fallback por si el hook no llegara a correr.)
 	spawnX, spawnY, _ = targetWindowPos(int32(winW), int32(winH))
@@ -958,13 +1007,13 @@ func startServer(initialPaths []string) string {
 		name := filepath.Base(p)
 		var src []byte
 		if decompilerFor(p) == nil { // los decompilables se leen dentro de RenderFile (usa la ruta)
-			if src, err = os.ReadFile(p); err != nil {
+			if src, err = readBounded(p); err != nil {
 				wr.WriteHeader(http.StatusInternalServerError)
 				writeJSON(wr, map[string]any{"ok": false, "error": err.Error()})
 				return
 			}
 		}
-		res, err := RenderFile(p, name, src)
+		res, err := RenderFile(p, name, src, pathKey(p))
 		if err != nil {
 			wr.WriteHeader(http.StatusInternalServerError)
 			writeJSON(wr, map[string]any{"ok": false, "error": err.Error()})
@@ -982,7 +1031,12 @@ func startServer(initialPaths []string) string {
 			"binary":     res.Binary,
 			"truncated":  res.Truncated,
 			"crlf":       res.CRLF,
+			"eol":        res.EOL,
 			"encoding":   res.Encoding,
+			"chunks":     res.Chunks,
+			"hlJob":      res.HLJob,
+			"hlFrom":     res.HLFrom,
+			"plain":      res.Plain,
 			"path":       p,
 			"dir":        filepath.Dir(p),
 			"name":       name,
@@ -1017,9 +1071,27 @@ func startServer(initialPaths []string) string {
 		writeJSON(wr, map[string]any{
 			"ok": true, "html": res.HTML, "lang": res.Lang, "lines": res.Lines,
 			"bytes": res.Bytes, "chars": res.Chars, "binary": res.Binary, "truncated": res.Truncated,
-			"crlf": res.CRLF, "encoding": res.Encoding, "path": "", "dir": "",
-			"name": filepath.Base(name),
+			"crlf": res.CRLF, "eol": res.EOL, "encoding": res.Encoding, "chunks": res.Chunks,
+			"hlJob": res.HLJob, "hlFrom": res.HLFrom, "plain": res.Plain,
+			"path": "", "dir": "", "name": filepath.Base(name),
 		})
+	})
+
+	// hl: bloques que el resaltado en segundo plano ya termino (ver hljob.go). La pagina los pide
+	// al recibir "hl" por el bus y los reemplaza en su lugar; cada bloque se entrega una sola vez.
+	mux.HandleFunc("/api/hl", func(wr http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseUint(r.URL.Query().Get("job"), 10, 64)
+		from, err2 := strconv.Atoi(r.URL.Query().Get("from"))
+		if err != nil || err2 != nil || from < 0 {
+			wr.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		chunks, done, ok := takeChunks(id, from)
+		if !ok {
+			wr.WriteHeader(http.StatusNotFound) // cancelado o ya entregado entero
+			return
+		}
+		writeJSON(wr, map[string]any{"from": from, "chunks": chunks, "done": done})
 	})
 
 	// asset: sirve un archivo local referenciado por el documento (imagenes relativas, etc.).
@@ -1066,48 +1138,29 @@ func startServer(initialPaths []string) string {
 			wr.WriteHeader(http.StatusBadRequest)
 			return
 		}
+		open := make(map[string]bool, len(body.Paths))
 		watchMu.Lock()
-		next := make(map[string]time.Time, len(body.Paths))
+		next := make(map[string]fileStamp, len(body.Paths))
 		for _, p := range body.Paths {
 			if p == "" {
 				continue
 			}
+			open[pathKey(p)] = true
 			if last, ok := watchSet[p]; ok {
-				next[p] = last // ya vigilada: conservar el mtime conocido
-			} else if fi, err := os.Stat(p); err == nil {
-				next[p] = fi.ModTime() // nueva: arrancar desde el estado actual (sin falso "change")
+				next[p] = last // ya vigilada: conservar el estado conocido
 			} else {
-				next[p] = time.Time{} // aún no existe: cualquier aparición contará como cambio
+				st, _ := stampOf(p) // nueva: arrancar desde el estado actual (sin falso "change")
+				next[p] = st
 			}
 		}
 		watchSet = next
 		watchMu.Unlock()
+		cancelJobsExcept(open) // una pestaña cerrada no sigue gastando CPU en resaltar
 		wr.WriteHeader(http.StatusNoContent)
 	})
 
 	// poller único de la lista de vigilancia (recarga en vivo de todas las pestañas)
-	go func() {
-		ticker := time.NewTicker(400 * time.Millisecond)
-		defer ticker.Stop()
-		for range ticker.C {
-			watchMu.Lock()
-			var changed []string
-			for p, last := range watchSet {
-				fi, err := os.Stat(p)
-				if err != nil {
-					continue
-				}
-				if fi.ModTime().After(last) {
-					watchSet[p] = fi.ModTime()
-					changed = append(changed, p)
-				}
-			}
-			watchMu.Unlock()
-			for _, p := range changed {
-				broadcastBus("change\t" + p)
-			}
-		}
-	}()
+	go pollWatched()
 
 	// bus: EL único SSE de la página (aperturas del daemon + cambios en disco). Ver el comentario
 	// de busSubs por qué multiplexado: el límite de 6 conexiones por host de Chromium es real.
@@ -1156,11 +1209,12 @@ func startServer(initialPaths []string) string {
 		wr.WriteHeader(http.StatusNoContent)
 	})
 
-	var handler http.Handler = mux
+	var handler http.Handler = onlyLocalHost(ln.Addr().String(), mux)
 	if debugLog {
+		guarded := handler
 		handler = http.HandlerFunc(func(wr http.ResponseWriter, r *http.Request) {
 			dlog("HTTP", r.Method, r.URL.Path)
-			mux.ServeHTTP(wr, r)
+			guarded.ServeHTTP(wr, r)
 		})
 	}
 	srv := &http.Server{Handler: handler}
@@ -1168,9 +1222,146 @@ func startServer(initialPaths []string) string {
 	return ln.Addr().String()
 }
 
+// writeJSON sin escapar HTML: por defecto encoding/json cambia cada < > & por \u003c y
+// compañía, y un HTML de resaltado es casi todo etiquetas: la respuesta pesaba más del doble. Acá
+// el JSON lo lee fetch().json(), nunca se incrusta en una página: no hay nada que proteger.
 func writeJSON(wr http.ResponseWriter, v any) {
 	wr.Header().Set("Content-Type", "application/json; charset=utf-8")
-	json.NewEncoder(wr).Encode(v)
+	enc := json.NewEncoder(wr)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		dlog("writeJSON:", err)
+	}
+}
+
+// onlyLocalHost deja pasar solo los pedidos dirigidos a NUESTRA direccion. El servidor escucha
+// en 127.0.0.1, pero una pagina cualquiera abierta en el navegador podria apuntarle con DNS
+// rebinding (un dominio suyo que pasa a resolver a 127.0.0.1) y, como para el navegador seria el
+// mismo origen, leer via /render o /asset cualquier archivo del disco. Ese pedido llega con el Host
+// del atacante: aca muere. (La ventana de Cipher y el handoff usan 127.0.0.1:puerto.)
+func onlyLocalHost(addr string, next http.Handler) http.Handler {
+	_, port, _ := net.SplitHostPort(addr)
+	allowed := map[string]bool{
+		"127.0.0.1:" + port: true,
+		"localhost:" + port: true,
+	}
+	return http.HandlerFunc(func(wr http.ResponseWriter, r *http.Request) {
+		if !allowed[strings.ToLower(r.Host)] {
+			http.Error(wr, "host no permitido", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(wr, r)
+	})
+}
+
+// pathKey: identidad de un archivo en Windows (mayúsculas y separadores no importan).
+func pathKey(p string) string { return strings.ToLower(filepath.Clean(p)) }
+
+// readBounded lee a lo sumo maxRenderBytes+1 bytes (más uno: para que RenderFile sepa que sobra
+// y avise "recortado"). Antes era os.ReadFile: un .log de 3 GB se subía entero a memoria.
+func readBounded(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(io.LimitReader(f, maxRenderBytes+1))
+}
+
+// ---- recarga en vivo -----------------------------------------------------------
+
+const (
+	watchInterval = 400 * time.Millisecond // cada cuanto se miran los archivos abiertos
+	settleStep    = 60 * time.Millisecond  // paso de la espera a que termine un guardado
+	settleRounds  = 8                      // ~0,5 s como mucho
+)
+
+// fileStamp identifica una version del archivo en disco (fecha + tamaño; el cero = no existe).
+// Mirar solo si la fecha AUMENTO no alcanza: restaurar una copia la hace retroceder, y un
+// guardado dentro del mismo tick de reloj puede cambiar solo el tamaño.
+type fileStamp struct {
+	mod  time.Time
+	size int64
+	ok   bool
+}
+
+func (a fileStamp) same(b fileStamp) bool {
+	return a.ok == b.ok && a.size == b.size && a.mod.Equal(b.mod)
+}
+
+func stampOf(path string) (fileStamp, bool) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return fileStamp{}, false
+	}
+	return fileStamp{fi.ModTime(), fi.Size(), true}, true
+}
+
+// settle espera a que el archivo deje de cambiar: los editores que guardan en dos pasos
+// (truncar y escribir, o temporal + renombrar) dejan un instante el archivo vacío o a medias, y
+// recargar justo ahí pintaba la pestaña en blanco por un parpadeo.
+func settle(path string, st fileStamp) fileStamp {
+	for i := 0; i < settleRounds; i++ {
+		time.Sleep(settleStep)
+		cur, _ := stampOf(path)
+		if cur.same(st) {
+			return cur
+		}
+		st = cur
+	}
+	return st
+}
+
+// pollWatched mira todos los archivos abiertos en cada tick. Los stat van EN PARALELO y FUERA
+// del lock: antes un recurso de red colgado bloqueaba /api/watch y demoraba la recarga de las
+// demás pestañas. Cambió -> "change"; desapareció -> "gone" (la pestaña lo muestra).
+func pollWatched() {
+	ticker := time.NewTicker(watchInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		watchMu.Lock()
+		paths := make([]string, 0, len(watchSet))
+		prev := make([]fileStamp, 0, len(watchSet))
+		for p, st := range watchSet {
+			paths = append(paths, p)
+			prev = append(prev, st)
+		}
+		watchMu.Unlock()
+
+		cur := make([]fileStamp, len(paths))
+		var wg sync.WaitGroup
+		for i, p := range paths {
+			wg.Add(1)
+			go func(i int, p string) {
+				defer wg.Done()
+				st, _ := stampOf(p)
+				if st.ok && !st.same(prev[i]) {
+					st = settle(p, st)
+				}
+				cur[i] = st
+			}(i, p)
+		}
+		wg.Wait()
+
+		var msgs []string
+		watchMu.Lock()
+		for i, p := range paths {
+			old, still := watchSet[p]
+			if !still || !old.same(prev[i]) || cur[i].same(prev[i]) {
+				continue // la pestaña se cerró, o /api/watch la reinició, o no cambió nada
+			}
+			watchSet[p] = cur[i]
+			if cur[i].ok {
+				msgs = append(msgs, "change\t"+p)
+			} else {
+				msgs = append(msgs, "gone\t"+p)
+			}
+		}
+		watchMu.Unlock()
+		for _, m := range msgs {
+			broadcastBus(m)
+		}
+	}
 }
 
 // broadcastBus empuja un mensaje ("open\truta" / "change\truta") a todos los suscriptos al bus.
@@ -1203,7 +1394,7 @@ func dumpRender(path string) {
 	if decompilerFor(abs) == nil {
 		src, _ = os.ReadFile(abs)
 	}
-	res, err := RenderFile(abs, name, src)
+	res, err := RenderFile(abs, name, src, "")
 	if err != nil {
 		fmt.Println("ERR", err)
 		return
