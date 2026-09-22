@@ -78,6 +78,11 @@
     <svg class="find-ico" width="13" height="13" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.2"/><line x1="10.2" y1="10.2" x2="13.5" y2="13.5"/></svg>
     <input id="findInput" type="text" placeholder="Buscar…" spellcheck="false" autocomplete="off">
     <span id="findCount" class="find-count"></span>
+    <span class="find-opts">
+      <button id="findCase" class="find-opt" title="Distinguir mayúsculas (Alt C)" tabindex="-1">Aa</button>
+      <button id="findWord" class="find-opt find-opt-word" title="Palabra entera (Alt W)" tabindex="-1">ab</button>
+      <button id="findRegex" class="find-opt" title="Expresión regular (Alt R)" tabindex="-1">.*</button>
+    </span>
     <button id="findPrev" class="find-nav" title="Anterior (Shift Enter)" tabindex="-1">
       <svg width="12" height="12" viewBox="0 0 16 16"><polyline points="11 10 8 5 5 10"/></svg>
     </button>
@@ -87,6 +92,13 @@
     <button id="findClose" class="find-nav" title="Cerrar (Esc)" tabindex="-1">
       <svg width="12" height="12" viewBox="0 0 16 16"><line x1="4" y1="4" x2="12" y2="12"/><line x1="12" y1="4" x2="4" y2="12"/></svg>
     </button>
+  </div>
+
+  <!-- ir a linea (Ctrl G) -->
+  <div id="gotobar">
+    <span class="goto-ico" aria-hidden="true">#</span>
+    <input id="gotoInput" type="text" placeholder="Ir a la línea…" spellcheck="false" autocomplete="off" inputmode="numeric">
+    <span id="gotoHint" class="find-count"></span>
   </div>
 
   <!-- cuerpo: visor de codigo -->
@@ -109,6 +121,7 @@
       </div>
       <div class="empty-hints">
         <span><b>Ctrl F</b> buscar</span>
+        <span><b>Ctrl G</b> ir a línea</span>
         <span><b>W</b> ajuste de línea</span>
         <span><b>Ctrl ±</b> tamaño</span>
         <span><b>F</b> pantalla completa</span>
@@ -127,6 +140,9 @@
       <span id="stMarks" class="st-pill" title="Zonas marcadas — n/p para saltar entre ellas"></span>
       <span id="stDecomp" class="st-pill"></span>
       <span id="stTrunc" class="st-pill st-warn"></span>
+      <span id="stHl" class="st-pill" title="El archivo es grande: se termina de resaltar en segundo plano"></span>
+      <span id="stPlain" class="st-pill" title="Renglones de más de 16 KB: se muestra sin resaltado"></span>
+      <span id="stGone" class="st-pill st-gone" title="El archivo ya no está en el disco: se ve la última versión leída"></span>
       <span id="stLang" class="st-item"></span>
       <span id="stLines" class="st-item"></span>
       <span id="stChars" class="st-item"></span>

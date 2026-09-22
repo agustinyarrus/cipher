@@ -4,20 +4,21 @@
 // redimensionado de la ventana frameless se piden al host (cipherDrag/cipherResize). El resto es
 // visor: muestra el HTML ya resaltado por el server (chroma) en PESTAÑAS — una por archivo, con
 // dedup por ruta; el handoff del daemon, el dialogo de abrir (multi-seleccion) y el drag&drop
-// abren aca — con gutter de numeros, busqueda, zoom, ajuste de linea, copiar y recarga en vivo.
+// abren aca — con gutter de numeros, busqueda, ir a linea, zoom, ajuste de linea, copiar,
+// resaltado progresivo de los archivos grandes y recarga en vivo.
 
 const $ = (id) => document.getElementById(id);
 const body = document.body;
 const view = $('view');
 const code = $('code');
 
-window.__log = (m) => { if (!window.__CIPHER_DEBUG__) return; try { fetch('/log?m=' + encodeURIComponent(m)); } catch (e) {} };
+window.__log = (m) => { if (!window.__CIPHER_DEBUG__) return; try { fetch('/log?m=' + encodeURIComponent(m)); } catch (e) { /* sin host */ } };
 window.addEventListener('error', (e) => window.__log('ERR ' + e.message + ' @' + (e.filename || '') + ':' + e.lineno));
 window.addEventListener('unhandledrejection', (e) => window.__log('REJECT ' + (e.reason && (e.reason.message || e.reason))));
 
 function bridge(name, ...args) {
   try { if (typeof window[name] === 'function') return window[name](...args); }
-  catch (e) { /* dev en navegador: sin host */ }
+  catch (e) { window.__log('bridge ' + name + ' ' + e); }
 }
 
 // =========================================================================
@@ -26,8 +27,10 @@ function bridge(name, ...args) {
 // muestra el caption centrado de siempre; la tira aparece recien con dos o mas.
 // =========================================================================
 const tabsNav = $('tabs');
-const tabs = [];      // orden visual
-let activeTab = null; // pestaña visible
+const tabs = [];               // orden visual
+const tabByKey = new Map();    // ruta normalizada -> pestaña (dedup y avisos del bus en O(1))
+const tabByJob = new Map();    // trabajo de resaltado -> pestaña
+let activeTab = null;          // pestaña visible
 let tabSeq = 0;
 
 function freshMarks() { return { regions: [], idx: -1, counts: [0, 0, 0] }; }
@@ -41,7 +44,8 @@ const TAB_X = '<svg width="10" height="10" viewBox="0 0 10 10"><line x1="1.7" y1
 function newTab(path) {
   const t = {
     id: ++tabSeq, path: path || null, key: path ? norm(path) : null,
-    name: '', j: null, scroll: 0, stale: false, marks: freshMarks(),
+    name: '', j: null, scroll: 0, stale: false, gone: false, marks: freshMarks(),
+    index: null, hl: null,
     el: document.createElement('div'), doc: document.createElement('div'),
   };
   t.el.className = 'tab'; t.el.setAttribute('role', 'tab');
@@ -52,6 +56,7 @@ function newTab(path) {
   t.el.addEventListener('pointerdown', (e) => { if (e.button === 1) e.preventDefault(); }); // sin autoscroll
   t.doc.className = 'doc'; t.doc.hidden = true;
   tabs.push(t);
+  if (t.key) tabByKey.set(t.key, t);
   tabsNav.appendChild(t.el);
   code.appendChild(t.doc);
   updateTabsMode();
@@ -76,7 +81,7 @@ function activateTab(t, opts = {}) {
   t.doc.hidden = false;
   marks = t.marks;
   body.classList.add('has-doc'); body.classList.remove('no-doc', 'empty');
-  body.classList.toggle('live-on', !!t.path);
+  body.classList.toggle('live-on', !!t.path && !t.gone);
   syncChrome(t);
   if (prev !== t) {
     view.scrollTop = t.scroll || 0;
@@ -92,6 +97,8 @@ function closeTab(t) {
   const i = tabs.indexOf(t);
   if (i < 0) return;
   tabs.splice(i, 1);
+  if (t.key && tabByKey.get(t.key) === t) tabByKey.delete(t.key);
+  if (t.hl) tabByJob.delete(t.hl.job);
   t.el.remove(); t.doc.remove();
   if (activeTab === t) {
     activeTab = null;
@@ -111,7 +118,7 @@ function clearToEmpty() {
   marks = freshMarks();
   body.classList.add('no-doc', 'empty');
   body.classList.remove('has-doc', 'live-on');
-  clearNotice(); closeFind();
+  clearNotice(); closeFind(); closeGoto();
   $('capName').textContent = ''; $('capLang').textContent = '';
   clearStatus(); updateProgress();
 }
@@ -136,7 +143,7 @@ function syncChrome(t) {
   $('capName').textContent = t.name || '';
   $('capLang').textContent = (t.j && !t.j.binary && t.j.lang) || '';
   if (t.j) {
-    fillStatus(t.j);
+    fillStatus(t.j, t);
     if (t.j.binary) showNotice('Archivo binario', 'No se puede mostrar como texto'); else clearNotice();
   }
   syncMarksPill();
@@ -152,7 +159,7 @@ function syncMarksPill() {
 // Las aperturas van EN COLA: una rafaga (multi-seleccion del dialogo, varios handoffs
 // seguidos) crea las pestañas en orden estable, sin carreras entre fetches.
 let openChain = Promise.resolve();
-const queueOpen = (p) => { openChain = openChain.then(() => openInTab(p)).catch(() => {}); };
+const queueOpen = (p) => { openChain = openChain.then(() => openInTab(p)).catch((e) => window.__log('cola ' + e)); };
 window.__cipherOpen = (p) => { (Array.isArray(p) ? p : [p]).forEach(queueOpen); }; // host: pick / Eval
 
 async function openInTab(path) {
@@ -160,46 +167,153 @@ async function openInTab(path) {
     const r = await fetch('/render?path=' + encodeURIComponent(path));
     const j = await r.json();
     if (!j.ok) { toast(j.error || 'No se pudo abrir'); return; }
-    const existing = tabs.find((x) => x.key && x.key === norm(j.path));
+    const existing = tabByKey.get(norm(j.path));
     const t = existing || newTab(j.path);
     // reabrir la misma pestaña con la MISMA spec de marcas -> refresco silencioso (conserva el
     // scroll); spec distinta (--hl nuevo o limpiado) -> repinta y salta a la primera zona.
     const silent = !!(existing && existing.j &&
       JSON.stringify(existing.j.hl || []) === JSON.stringify(j.hl || []));
     activateTab(t, { noRefresh: true });
-    const keep = view.scrollTop;
+    const anchor = silent ? lineAnchor() : null;
     paint(t, j, { silent });
-    if (silent) { view.scrollTop = keep; updateProgress(); }
-    t.stale = false; t.el.classList.remove('stale');
+    if (anchor) restoreLineAnchor(anchor);
+    setStale(t, false); setGone(t, false);
   } catch (e) { window.__log('open ' + e); toast('Error al abrir'); }
 }
 
-// Arrastrar-y-soltar: resalta texto crudo (sin ruta en disco -> sin recarga viva ni dedup).
-async function renderRawText(text, name) {
+// Arrastrar-y-soltar: se mandan los BYTES (sin ruta en disco -> sin recarga viva ni dedup). Leerlo
+// como texto aca lo decodificaba como UTF-8 y un .reg en UTF-16 llegaba al server ya roto.
+async function renderRawBytes(bytes, name) {
   try {
     const r = await fetch('/render-text?name=' + encodeURIComponent(name || 'snippet.txt'), {
-      method: 'POST', headers: { 'Content-Type': 'text/plain; charset=utf-8' }, body: text,
+      method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: bytes,
     });
     const j = await r.json();
     if (!j.ok) { toast('No se pudo abrir'); return; }
     const t = newTab(null);
     activateTab(t, { noRefresh: true });
     paint(t, j, {});
-  } catch (e) { toast('Error al abrir'); }
+  } catch (e) { window.__log('drop ' + e); toast('Error al abrir'); }
 }
 
 // paint inyecta el HTML resaltado en el doc de la pestaña y, si es la activa, refresca el cromo.
 function paint(t, j, opts) {
   t.j = j; t.name = j.name || '';
+  t.index = null;                                   // el indice de busqueda se rearma al buscar
   setTabLabel(t);
   t.doc.innerHTML = j.binary ? '' : (j.html || '');
+  t.doc.style.setProperty('--dg', String(Math.max(1, String(j.lines || 1).length)));
   applyMarks(t, j.hl, opts);
+  startHighlightPull(t, j);
   if (t === activeTab) {
     syncChrome(t);
     if (!opts.silent && !t.marks.regions.length) { view.scrollTop = 0; updateProgress(); }
     refind();
   }
   window.__log('painted ' + (j.name || ''));
+}
+
+// =========================================================================
+// Resaltado progresivo (ver hljob.go): los archivos grandes llegan con las primeras pantallas
+// resaltadas y el resto PLANO. El server sigue tokenizando en segundo plano y avisa por el bus
+// ("hl"); aca se piden esos bloques y se reemplazan en su lugar. Mismo texto y misma grilla: la
+// vista no se mueve. Un bloque con una seleccion adentro se deja para despues (reemplazarlo la
+// borraria).
+// =========================================================================
+function startHighlightPull(t, j) {
+  if (t.hl) tabByJob.delete(t.hl.job);
+  t.hl = null;
+  if (j.hlJob) {
+    t.hl = { job: j.hlJob, next: j.hlFrom, total: j.chunks, busy: false, again: false, held: [] };
+    tabByJob.set(j.hlJob, t);
+    pullHighlight(t);                                // lo que ya este listo, sin esperar al bus
+  }
+  if (t === activeTab) syncHlPill(t);
+}
+
+async function pullHighlight(t) {
+  const hl = t.hl;
+  if (!hl) return;
+  if (hl.busy) { hl.again = true; return; }
+  hl.busy = true;
+  try {
+    do {
+      hl.again = false;
+      const r = await fetch(`/api/hl?job=${hl.job}&from=${hl.next}`);
+      if (t.hl !== hl) return;                       // la pestaña se re-pinto mientras tanto
+      if (!r.ok) { endHighlight(t); return; }        // cancelado o ya entregado
+      const j = await r.json();
+      if (j.chunks.length) applyChunks(t, j.from, j.chunks);
+      hl.next = j.from + j.chunks.length;
+      if (t === activeTab) syncHlPill(t);
+      if (j.done || hl.next >= hl.total) { endHighlight(t); return; }
+    } while (hl.again);
+  } catch (e) { window.__log('hl ' + e); }
+  finally { hl.busy = false; }
+}
+
+function endHighlight(t) {
+  if (!t.hl) return;
+  if (t.hl.held.length) { setTimeout(() => flushHeld(t), 1000); return; } // quedan bloques con seleccion
+  tabByJob.delete(t.hl.job);
+  t.hl = null;
+  if (t === activeTab) syncHlPill(t);
+}
+
+const chunksOf = (t) => t.doc.querySelector('pre.chroma > code');
+
+function applyChunks(t, from, htmls) {
+  const holder = chunksOf(t);
+  if (!holder) return;
+  const tpl = document.createElement('template');
+  tpl.innerHTML = htmls.join('');
+  const fresh = [...tpl.content.children];
+  const sel = window.getSelection();
+  for (let i = 0; i < fresh.length; i++) {
+    const old = holder.children[from + i];
+    if (!old) break;
+    if (sel && !sel.isCollapsed && (old.contains(sel.anchorNode) || old.contains(sel.focusNode))) {
+      t.hl.held.push({ idx: from + i, el: fresh[i] });  // no borrarle la seleccion al usuario
+      continue;
+    }
+    old.replaceWith(fresh[i]);
+  }
+  afterChunksChanged(t);
+}
+
+function flushHeld(t) {
+  const hl = t.hl;
+  if (!hl || !hl.held.length) { endHighlight(t); return; }
+  const holder = chunksOf(t);
+  const sel = window.getSelection();
+  hl.held = hl.held.filter(({ idx, el }) => {
+    const old = holder && holder.children[idx];
+    if (!old) return false;
+    if (sel && !sel.isCollapsed && (old.contains(sel.anchorNode) || old.contains(sel.focusNode))) return true;
+    old.replaceWith(el);
+    return false;
+  });
+  afterChunksChanged(t);
+  if (hl.held.length) setTimeout(() => flushHeld(t), 1000); else endHighlight(t);
+}
+
+// los renglones reemplazados son elementos nuevos: marcas (--hl) y busqueda se recalculan
+function afterChunksChanged(t) {
+  t.index = null;
+  if (t.marks.regions.length) {
+    const idx = t.marks.idx;
+    applyMarks(t, t.j.hl, { silent: true });
+    t.marks.idx = idx;
+  }
+  if (t === activeTab) scheduleRefind();
+}
+
+function syncHlPill(t) {
+  const pill = $('stHl');
+  if (t && t.hl && t.hl.total) {
+    pill.textContent = 'resaltando ' + Math.floor(100 * t.hl.next / t.hl.total) + '%';
+    pill.classList.add('on');
+  } else { pill.textContent = ''; pill.classList.remove('on'); }
 }
 
 // =========================================================================
@@ -214,16 +328,18 @@ function applyMarks(t, hl, opts) {
   const mk = t.marks;
   mk.regions = []; mk.idx = -1; mk.counts = [0, 0, 0];
   const ranges = Array.isArray(hl) ? hl : [];
-  const lines = ranges.length ? t.doc.querySelectorAll('.chroma .line') : [];
+  if (!ranges.length) return;
+  const lines = t.doc.getElementsByClassName('line');
   for (const r of ranges) {
     const from = r[0], to = Math.min(r[1], lines.length);
     const kind = (r[2] === 1 || r[2] === 2) ? r[2] : 0;
     if (!(from >= 1 && from <= lines.length)) continue;
     const els = [];
     for (let n = from; n <= to; n++) {
-      els.push(lines[n - 1]);
-      lines[n - 1].classList.add('hl');
-      if (MK_CLS[kind]) lines[n - 1].classList.add(MK_CLS[kind]);
+      const el = lines[n - 1];
+      els.push(el);
+      el.classList.add('hl');
+      if (MK_CLS[kind]) el.classList.add(MK_CLS[kind]);
     }
     els[0].classList.add('hl-start');
     els[els.length - 1].classList.add('hl-end');
@@ -285,32 +401,33 @@ function fmtWhen(ms) {
   const dm = p(d.getDate()) + '/' + p(d.getMonth() + 1);
   return (d.getFullYear() === now.getFullYear() ? dm : dm + '/' + String(d.getFullYear()).slice(-2)) + ' ' + hm;
 }
-function fillStatus(j) {
+function pill(id, text) {
+  const el = $(id); el.textContent = text || ''; el.classList.toggle('on', !!text);
+}
+function fillStatus(j, t) {
   $('stPath').textContent = j.path || j.name || '';
-  const dec = $('stDecomp');
-  if (j.decompiled) { dec.textContent = 'decompilado · ' + (j.tool || ''); dec.classList.add('on'); }
-  else { dec.textContent = ''; dec.classList.remove('on'); }
-  const tr = $('stTrunc');
-  if (j.truncated) { tr.textContent = 'recortado'; tr.classList.add('on'); }
-  else { tr.textContent = ''; tr.classList.remove('on'); }
+  pill('stDecomp', j.decompiled ? 'decompilado · ' + (j.tool || '') : '');
+  pill('stTrunc', j.truncated ? 'recortado' : '');
+  pill('stPlain', j.plain ? 'sin resaltado · ' + j.plain : '');
+  pill('stGone', t && t.gone ? 'borrado del disco' : '');
   $('stLang').textContent = j.binary ? 'binario' : (j.lang || '');
-  $('stLines').textContent = j.binary ? '' : ((j.lines || 0) + (j.lines === 1 ? ' línea' : ' líneas'));
+  $('stLines').textContent = j.binary ? '' : (nf.format(j.lines || 0) + (j.lines === 1 ? ' línea' : ' líneas'));
   $('stChars').textContent = (j.binary || j.chars == null) ? '' : nf.format(j.chars) + ' carac.';
   $('stSize').textContent = humanSize(j.binary ? j.bytes : (j.size != null ? j.size : j.bytes));
-  // codificación + fin de línea. La codificación sólo se muestra si NO es UTF-8 a secas
-  // (un .reg de regedit, por ejemplo, viene en UTF-16 LE).
-  $('stEol').textContent = j.binary ? ''
-    : (j.encoding ? j.encoding + ' · ' : '') + (j.crlf ? 'CRLF' : 'LF');
+  // codificación + fin de línea. La codificación sólo se muestra si NO es UTF-8 a secas (un .reg
+  // de regedit viene en UTF-16 LE) y el fin de línea sólo si hay más de un renglón; "Mixto"
+  // delata el archivo con finales mezclados (un clásico de los merges).
+  const eol = j.eol !== undefined ? j.eol : (j.crlf ? 'CRLF' : 'LF');
+  $('stEol').textContent = j.binary ? '' : [j.encoding, eol].filter(Boolean).join(' · ');
   $('stMod').textContent = j.mtime ? 'mod ' + fmtWhen(j.mtime) : '';
   $('stSel').textContent = '';
+  syncHlPill(t);
 }
 function clearStatus() {
   for (const id of ['stPath', 'stSel', 'stLang', 'stLines', 'stChars', 'stSize', 'stEol', 'stMod', 'stPos']) {
     $(id).textContent = '';
   }
-  for (const id of ['stMarks', 'stDecomp', 'stTrunc']) {
-    const el = $(id); el.textContent = ''; el.classList.remove('on');
-  }
+  for (const id of ['stMarks', 'stDecomp', 'stTrunc', 'stHl', 'stPlain', 'stGone']) pill(id, '');
 }
 
 // ---- aviso central (binario / vacío) ------------------------------------
@@ -330,14 +447,16 @@ function clearNotice() { if (noticeEl) { noticeEl.remove(); noticeEl = null; } }
 // ---- copiar todo (la pestaña activa) ------------------------------------
 async function copyAll() {
   const root = adoc();
-  const lines = [...root.querySelectorAll('.chroma .cl')].map((el) => el.textContent);
+  const lines = [...root.getElementsByClassName('cl')].map((el) => el.textContent);
   let text = lines.length ? lines.join('\n') : root.textContent;
   if (!text) { const pre = root.querySelector('pre'); text = pre ? pre.innerText : ''; }
   if (!text) return;
   try { await navigator.clipboard.writeText(text); }
   catch (e) {
+    window.__log('clipboard ' + e);
     const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta);
-    ta.select(); try { document.execCommand('copy'); } catch (_) {} ta.remove();
+    ta.select(); try { document.execCommand('copy'); } catch (err) { window.__log('execCommand ' + err); }
+    ta.remove();
   }
   toast('Copiado', true);
 }
@@ -350,37 +469,72 @@ async function copyAll() {
 // de fondo, marca el punto verde y refresca recién al activarla.
 // =========================================================================
 function syncWatch() {
-  try {
-    fetch('/api/watch', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paths: tabs.filter((t) => t.path).map((t) => t.path) }),
-    });
-  } catch (e) {}
+  fetch('/api/watch', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paths: tabs.filter((t) => t.path).map((t) => t.path) }),
+  }).catch((e) => window.__log('watch ' + e));
+}
+function setStale(t, on) { t.stale = on; t.el.classList.toggle('stale', on); }
+function setGone(t, on) {
+  t.gone = on; t.el.classList.toggle('gone', on);
+  if (t === activeTab) { pill('stGone', on ? 'borrado del disco' : ''); body.classList.toggle('live-on', !!t.path && !on); }
 }
 function onFileChanged(path) {
-  const t = tabs.find((x) => x.key && x.key === norm(path));
+  const t = tabByKey.get(norm(path));
   if (!t) return;
+  setGone(t, false);
   if (t === activeTab) liveReload(t);
-  else { t.stale = true; t.el.classList.add('stale'); }
+  else setStale(t, true);
 }
+function onFileGone(path) {
+  const t = tabByKey.get(norm(path));
+  if (t) setGone(t, true);
+}
+
+// ancla de lectura por RENGLON: el primer renglon visible y cuanto de el ya se scrolleo. Tras la
+// recarga se vuelve al mismo numero de renglon (lo natural en codigo: la vista no "viaja" si se
+// agregan renglones al final). Antes era la fraccion del scroll, que se corria con cada cambio.
+function lineAnchor() {
+  const el = topLine();
+  if (!el) return null;
+  return { n: lineNumberOf(el), delta: view.scrollTop - el.offsetTop };
+}
+function restoreLineAnchor(a) {
+  const lines = adoc().getElementsByClassName('line');
+  const el = lines[Math.min(a.n, lines.length) - 1];
+  if (el) view.scrollTop = el.offsetTop + a.delta;
+  updateProgress();
+}
+// el renglon que esta arriba de todo: elementFromPoint sobre el gutter (O(1), vale con y sin ajuste)
+function topLine() {
+  const r = view.getBoundingClientRect();
+  const hit = document.elementFromPoint(r.left + 4, r.top + 2);
+  return hit ? hit.closest('.line') : null;
+}
+const lineNumberOf = (el) => parseInt(el.querySelector('.ln').textContent, 10) || 1;
+
 async function liveReload(t) {
   if (!t || !t.path) return;
-  const denom = Math.max(1, view.scrollHeight - view.clientHeight);
-  const keep = view.scrollTop / denom;
   try {
     const r = await fetch('/render?path=' + encodeURIComponent(t.path));
     const j = await r.json();
     if (!j.ok) return;
+    setStale(t, false);
+    if (t.j && j.html === t.j.html) {            // mismo contenido (se toco la fecha): no repintar
+      t.j.mtime = j.mtime;
+      if (t === activeTab) fillStatus(t.j, t);
+      // el render nuevo cancelo el trabajo de resaltado anterior: adoptar el nuevo (re-entrega
+      // bloques identicos a los ya pintados, que se reemplazan sin que nada se mueva)
+      if (j.hlJob) startHighlightPull(t, j);
+      return;
+    }
+    const anchor = t === activeTab ? lineAnchor() : null;
     paint(t, j, { silent: true });
-    t.stale = false; t.el.classList.remove('stale');
     if (t === activeTab) {
-      requestAnimationFrame(() => {
-        view.scrollTop = keep * Math.max(1, view.scrollHeight - view.clientHeight);
-        updateProgress();
-      });
+      if (anchor) restoreLineAnchor(anchor);
       pulseLive(t);
     }
-  } catch (e) {}
+  } catch (e) { window.__log('reload ' + e); }
 }
 function pulseLive(t) {
   const d = $('capLive'); d.classList.remove('pulse'); void d.offsetWidth; d.classList.add('pulse');
@@ -402,12 +556,86 @@ function updateProgress() {
 view.addEventListener('scroll', updateProgress, { passive: true });
 
 // =========================================================================
-// Busqueda (CSS Custom Highlight API), sobre el código ACTIVO, excluyendo el gutter
+// Busqueda (CSS Custom Highlight API) sobre un INDICE DE RENGLONES del documento activo
+//
+// El indice es el texto de cada renglon (sus .cl), armado una vez por render y consultado por
+// cada tecla sin recorrer el DOM. Lo que antes no andaba: cada token es un <span>, y la busqueda
+// miraba nodo por nodo, asi que "func main" (keyword + espacio + nombre) daba 0 resultados. Ahora
+// una coincidencia puede cruzar todos los tokens que quiera dentro de su renglon. Opciones:
+// Aa (mayusculas), ab (palabra entera), .* (expresion regular).
 // =========================================================================
-const find = { matches: [], idx: -1 };
+const find = { matches: [], idx: -1, opts: { caseSensitive: false, word: false, regex: false } };
 const supportsHL = !!(window.CSS && CSS.highlights && window.Highlight);
+const MAX_HITS = 5000;          // el Highlight API sufre con decenas de miles
+
+function docIndex(t) {
+  if (t.index) return t.index;
+  const els = [...t.doc.getElementsByClassName('cl')];
+  const text = new Array(els.length);
+  for (let i = 0; i < els.length; i++) text[i] = els[i].textContent;
+  t.index = { els, text, lower: null };
+  return t.index;
+}
+
+// matcher: a partir de la consulta y las opciones, una funcion renglon -> [[ini, fin], …]
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function buildMatcher(q, o) {
+  if (!o.regex && !o.word) {
+    const needle = o.caseSensitive ? q : q.toLowerCase();
+    return { plain: needle };
+  }
+  const src = o.regex ? q : escapeRe(q);
+  const ci = o.caseSensitive ? '' : 'i';
+  // palabra entera con bordes Unicode (ñ, á: \b de JS solo entiende ASCII) -> hace falta la
+  // bandera u. Sin "palabra entera", la regex del usuario va SIN u: en modo u, cosas comunes
+  // como \- o \: son errores de sintaxis y la busqueda quedaba en rojo sin razon.
+  const re = o.word
+    ? new RegExp(`(?<![\\p{L}\\p{N}_])(?:${src})(?![\\p{L}\\p{N}_])`, 'gu' + ci)
+    : new RegExp(src, 'g' + ci);
+  return { re };
+}
+function matchLine(m, text, lowerText, out, line) {
+  if (m.plain !== undefined) {
+    const hay = lowerText !== null ? lowerText : text;
+    for (let i = hay.indexOf(m.plain); i >= 0 && out.length < MAX_HITS; i = hay.indexOf(m.plain, i + m.plain.length)) {
+      out.push([line, i, i + m.plain.length]);
+    }
+    return;
+  }
+  m.re.lastIndex = 0;
+  let r;
+  while ((r = m.re.exec(text)) && out.length < MAX_HITS) {
+    if (r[0].length === 0) { m.re.lastIndex++; continue; }   // coincidencia vacia: avanzar
+    out.push([line, r.index, r.index + r[0].length]);
+  }
+}
+
+// (renglon, offset) -> (nodo de texto, offset): se camina el .cl de ese renglon una sola vez
+function rangesForLine(el, hits) {
+  const out = [];
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode(), base = 0, h = 0;
+  const pos = [];                       // extremos ordenados a resolver
+  for (const [, s, e] of hits) pos.push(s, e);
+  const res = new Array(pos.length);
+  const order = pos.map((v, i) => i).sort((a, b) => pos[a] - pos[b]);
+  for (const i of order) {
+    const want = pos[i];
+    while (node && base + node.nodeValue.length < want) { base += node.nodeValue.length; node = walker.nextNode(); }
+    // un extremo justo en el borde entre dos nodos: el comienzo va al siguiente, el fin al anterior
+    res[i] = node ? [node, want - base] : null;
+  }
+  for (let k = 0; k < hits.length; k++, h += 2) {
+    const a = res[h], b = res[h + 1];
+    if (!a || !b) continue;
+    const r = document.createRange();
+    try { r.setStart(a[0], a[1]); r.setEnd(b[0], b[1]); out.push(r); } catch (e) { window.__log('range ' + e); }
+  }
+  return out;
+}
 
 function openFind() {
+  closeGoto();
   body.classList.add('find-open');
   const inp = $('findInput'); inp.focus(); inp.select();
   if (inp.value) runFind(inp.value);
@@ -422,58 +650,69 @@ function closeFind() {
 function refind() {
   if (!body.classList.contains('find-open')) return;
   const v = $('findInput').value;
-  if (v) runFind(v); else updateFindCount();
+  if (v) runFind(v, { keepPlace: true }); else updateFindCount();
 }
-function runFind(term) {
+let refindTimer = 0;
+function scheduleRefind() { clearTimeout(refindTimer); refindTimer = setTimeout(refind, 200); }
+
+function runFind(term, { keepPlace = false } = {}) {
   if (!supportsHL) return;
+  const prevLine = keepPlace && find.matches[find.idx] ? find.matches[find.idx].line : -1;
   CSS.highlights.delete('cipher-find'); CSS.highlights.delete('cipher-find-current');
   find.matches = []; find.idx = -1;
-  const q = term.trim().toLowerCase();
-  if (!q) { updateFindCount(); return; }
-
-  const root = adoc();
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode(node) {
-      if (!node.nodeValue) return NodeFilter.FILTER_REJECT;
-      let p = node.parentElement;
-      while (p && p !== root) {
-        if (p.classList && p.classList.contains('ln')) return NodeFilter.FILTER_REJECT; // gutter
-        const tag = p.tagName;
-        if (tag === 'STYLE' || tag === 'SCRIPT' || tag === 'svg') return NodeFilter.FILTER_REJECT;
-        p = p.parentElement;
-      }
-      return NodeFilter.FILTER_ACCEPT;
-    },
-  });
+  $('findbar').classList.remove('bad');
+  const t = activeTab;
+  const q = find.opts.regex ? term : term.trim();
+  if (!q || !t || !t.j || t.j.binary) { updateFindCount(); return; }
+  let m;
+  try { m = buildMatcher(q, find.opts); }
+  catch (e) { $('findbar').classList.add('bad'); updateFindCount(); return; }  // regex a medio escribir
+  const ix = docIndex(t);
+  if (m.plain !== undefined && !find.opts.caseSensitive && !ix.lower) ix.lower = ix.text.map((s) => s.toLowerCase());
+  const hits = [];
+  for (let i = 0; i < ix.text.length && hits.length < MAX_HITS; i++) {
+    matchLine(m, ix.text[i], m.plain !== undefined && !find.opts.caseSensitive ? ix.lower[i] : null, hits, i);
+  }
+  // rangos agrupados por renglon (el DOM de cada renglon se camina una sola vez)
   const ranges = [];
-  let node;
-  while ((node = walker.nextNode())) {
-    const hay = node.nodeValue.toLowerCase();
-    let i = hay.indexOf(q);
-    while (i >= 0) {
-      const rr = document.createRange();
-      rr.setStart(node, i); rr.setEnd(node, i + q.length);
-      ranges.push(rr);
-      i = hay.indexOf(q, i + q.length);
+  for (let a = 0; a < hits.length;) {
+    let b = a;
+    while (b < hits.length && hits[b][0] === hits[a][0]) b++;
+    for (const r of rangesForLine(ix.els[hits[a][0]], hits.slice(a, b))) {
+      r.line = hits[a][0];
+      ranges.push(r);
     }
+    a = b;
   }
   find.matches = ranges;
   if (ranges.length) {
     const hl = new Highlight(...ranges); hl.priority = 1;
     CSS.highlights.set('cipher-find', hl);
-    find.idx = 0; markCurrent();
+    // arrancar por la coincidencia mas cercana a donde se esta leyendo (o donde estaba)
+    const top = topLine();
+    const from = prevLine >= 0 ? prevLine : (top ? lineNumberOf(top) - 1 : 0);
+    const k = ranges.findIndex((r) => r.line >= from);
+    find.idx = k >= 0 ? k : 0;
+    markCurrent(!keepPlace);
   }
   updateFindCount();
 }
-function markCurrent() {
+function markCurrent(scroll = true) {
   if (!supportsHL) return;
   CSS.highlights.delete('cipher-find-current');
   const rr = find.matches[find.idx];
   if (!rr) return;
   const cur = new Highlight(rr); cur.priority = 2;
   CSS.highlights.set('cipher-find-current', cur);
-  const el = rr.startContainer.parentElement;
-  if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  if (scroll) {
+    // solo si no esta ya comoda a la vista (con content-visibility el renglon puede no estar medido)
+    const line = rr.startContainer.parentElement.closest('.line');
+    const b = rr.getBoundingClientRect(), v = view.getBoundingClientRect();
+    const margin = v.height * 0.12;
+    if (b.top < v.top + margin || b.bottom > v.bottom - margin || b.left < v.left || b.right > v.right) {
+      (line || rr.startContainer.parentElement).scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+    }
+  }
   updateFindCount();
 }
 function findStep(dir) {
@@ -483,22 +722,80 @@ function findStep(dir) {
 }
 function updateFindCount() {
   const c = $('findCount');
-  c.textContent = find.matches.length ? (find.idx + 1) + '/' + find.matches.length : (($('findInput').value ? '0/0' : ''));
+  const n = find.matches.length;
+  c.textContent = n ? (find.idx + 1) + '/' + (n >= MAX_HITS ? MAX_HITS + '+' : n) : ($('findInput').value ? '0/0' : '');
 }
-$('findInput').addEventListener('input', (e) => runFind(e.target.value));
+function toggleFindOpt(name, btn) {
+  find.opts[name] = !find.opts[name];
+  btn.classList.toggle('on', find.opts[name]);
+  const v = $('findInput').value;
+  if (v) runFind(v);
+  $('findInput').focus();
+}
+const FIND_OPTS = { c: ['caseSensitive', 'findCase'], w: ['word', 'findWord'], r: ['regex', 'findRegex'] };
+for (const [name, id] of Object.values(FIND_OPTS)) {
+  $(id).addEventListener('click', () => toggleFindOpt(name, $(id)));
+}
+let findFrame = 0;
+$('findInput').addEventListener('input', (e) => {    // una rafaga de teclas = una busqueda por frame
+  cancelAnimationFrame(findFrame);
+  findFrame = requestAnimationFrame(() => runFind(e.target.value));
+});
 $('findInput').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); findStep(e.shiftKey ? -1 : 1); }
   else if (e.key === 'Escape') { e.preventDefault(); closeFind(); }
+  else if (e.altKey && FIND_OPTS[e.key.toLowerCase()]) {
+    e.preventDefault();
+    const [name, id] = FIND_OPTS[e.key.toLowerCase()];
+    toggleFindOpt(name, $(id));
+  }
 });
 $('findPrev').addEventListener('click', () => findStep(-1));
 $('findNext').addEventListener('click', () => findStep(1));
 $('findClose').addEventListener('click', closeFind);
 
 // =========================================================================
+// Ir a linea (Ctrl G): "120" salta al renglon 120 y lo destella. Tambien acepta "120:8"
+// (renglon:columna, lo que escupen los compiladores) y numeros negativos (desde el final).
+// =========================================================================
+function openGoto() {
+  if (!activeTab || !activeTab.j || activeTab.j.binary) return;
+  closeFind();
+  body.classList.add('goto-open');
+  const inp = $('gotoInput');
+  const total = activeTab.j.lines || 0;
+  $('gotoHint').textContent = '1–' + nf.format(total);
+  inp.value = ''; inp.focus();
+}
+function closeGoto() { body.classList.remove('goto-open'); $('gotoInput').blur(); }
+function gotoLine(raw) {
+  const t = activeTab;
+  if (!t) return;
+  const m = /^\s*(-?\d+)\s*(?::\s*\d+)?\s*$/.exec(raw);
+  if (!m) { toast('Número de línea inválido'); return; }
+  const total = t.j.lines || 0;
+  let n = parseInt(m[1], 10);
+  if (n < 0) n = total + 1 + n;
+  n = Math.max(1, Math.min(total, n));
+  const el = t.doc.getElementsByClassName('line')[n - 1];
+  if (!el) return;
+  el.scrollIntoView({ block: 'center', behavior: 'auto' });
+  el.classList.remove('goto-flash'); void el.offsetWidth; el.classList.add('goto-flash');
+  updateProgress();
+  closeGoto();
+}
+$('gotoInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); gotoLine(e.target.value); }
+  else if (e.key === 'Escape') { e.preventDefault(); closeGoto(); }
+});
+$('gotoInput').addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== $('gotoInput')) body.classList.remove('goto-open'); }, 120));
+
+// =========================================================================
 // Zoom + ajuste de linea + persistencia (server-side; ver config.go)
 // =========================================================================
 let rscale = (typeof window.__CIPHER_RSCALE__ === 'number' && window.__CIPHER_RSCALE__ > 0) ? window.__CIPHER_RSCALE__ : 1;
 let wrap = window.__CIPHER_WRAP__ === true;
+const RSCALE_MIN = 0.6, RSCALE_MAX = 2.2, RSCALE_STEP_KEY = 0.08, RSCALE_STEP_WHEEL = 0.07;
 
 // ---- escala tipografica --------------------------------------------------------------------
 // El cuerpo del codigo se eligio para caer en 16 px FISICOS exactos a 150 % de DPI, pero eso vale
@@ -519,9 +816,13 @@ const CROMO = [10, 11, 11.5, 12, 12.5, 13, 14];
 // un escalon a Light. De 0,8 de zoom para arriba nunca se toca.
 const pesoCodigo = (px) => (px * PT < 6 ? 300 : 200);
 
+let scaledFor = null;        // "rscale@dpr" ya aplicado: re-aplicar lo mismo es trabajo tirado
 function applyScale() {
-  rscale = Math.min(2.2, Math.max(0.6, rscale));
+  rscale = Math.min(RSCALE_MAX, Math.max(RSCALE_MIN, rscale));
   const dpr = window.devicePixelRatio || 1;
+  const key = rscale.toFixed(3) + '@' + dpr;
+  if (key === scaledFor) return;
+  scaledFor = key;
   const alPixel = (px) => Math.max(1, Math.round(Math.max(px, PISO_PX) * dpr)) / dpr;
   const raiz = document.documentElement.style;
 
@@ -542,14 +843,31 @@ function applyWrap() {
 }
 applyScale(); applyWrap();
 
+// El DPI puede cambiar sin que haya resize (arrastrar la ventana a un monitor con otra escala):
+// hay que volver a redondear ahi tambien, o el codigo queda apoyado en la grilla del monitor viejo
+// y la ExtraLight se ablanda. (Folio ya lo hacia; Cipher no.)
+let mqDpr = null;
+function watchDpr() {
+  if (mqDpr) mqDpr.removeEventListener('change', onDprChange);
+  mqDpr = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+  mqDpr.addEventListener('change', onDprChange);
+}
+function onDprChange() { applyScale(); watchDpr(); }
+watchDpr();
+
+function zoomTo(next) {
+  const anchor = activeTab ? lineAnchor() : null;   // el zoom no te cambia de renglon
+  rscale = Math.min(RSCALE_MAX, Math.max(RSCALE_MIN, next));
+  applyScale(); saveSettings();
+  if (anchor) { anchor.delta = 0; restoreLineAnchor(anchor); }
+}
+
 let saveTimer = null;
 function postSettings() {
-  try {
-    fetch('/api/settings', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rscale, wrap }),
-    });
-  } catch (e) {}
+  fetch('/api/settings', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rscale, wrap }),
+  }).catch((e) => window.__log('settings ' + e));
 }
 function saveSettings() {
   clearTimeout(saveTimer);
@@ -558,9 +876,13 @@ function saveSettings() {
 window.addEventListener('pagehide', () => {
   if (!saveTimer) return;
   clearTimeout(saveTimer); saveTimer = null;
-  try { navigator.sendBeacon('/api/settings', JSON.stringify({ rscale, wrap })); } catch (e) { postSettings(); }
+  if (!navigator.sendBeacon('/api/settings', JSON.stringify({ rscale, wrap }))) postSettings();
 });
-function toggleWrap() { wrap = !wrap; applyWrap(); saveSettings(); }
+function toggleWrap() {
+  const anchor = activeTab ? lineAnchor() : null;   // con ajuste los renglones cambian de alto
+  wrap = !wrap; applyWrap(); saveSettings();
+  if (anchor) { anchor.delta = 0; restoreLineAnchor(anchor); }
+}
 
 // =========================================================================
 // Pantalla completa
@@ -583,11 +905,12 @@ $('btnFind').addEventListener('click', openFind);
 $('btnOpen').addEventListener('click', () => bridge('cipherPick'));
 $('emptyOpen').addEventListener('click', () => bridge('cipherPick'));
 
+const DBLCLICK_MS = 300;
 let lastTbDown = 0;
 $('titlebar').addEventListener('pointerdown', (e) => {
   if (e.button !== 0 || e.target.closest('.winbtn') || e.target.closest('.tbtn') || e.target.closest('.tab')) return;
   const now = Date.now();
-  if (now - lastTbDown < 300) { lastTbDown = 0; bridge('cipherMaxToggle'); body.classList.toggle('maximized'); return; }
+  if (now - lastTbDown < DBLCLICK_MS) { lastTbDown = 0; bridge('cipherMaxToggle'); body.classList.toggle('maximized'); return; }
   lastTbDown = now;
   bridge('cipherDrag');
 });
@@ -602,15 +925,17 @@ function typing() {
   const a = document.activeElement;
   return a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable);
 }
+const SCROLL_PAGE = 0.86, SCROLL_LINE = 90;
 window.addEventListener('keydown', (e) => {
   if (e.ctrlKey || e.metaKey) {
     const k = e.key.toLowerCase();
     if (k === 'o') { e.preventDefault(); bridge('cipherPick'); return; }
     if (k === 'f') { e.preventDefault(); openFind(); return; }
-    if (k === 'c' && !window.getSelection().toString()) { e.preventDefault(); copyAll(); return; }
-    if (k === '=' || k === '+') { e.preventDefault(); rscale += 0.08; applyScale(); saveSettings(); return; }
-    if (k === '-' || k === '_') { e.preventDefault(); rscale -= 0.08; applyScale(); saveSettings(); return; }
-    if (k === '0') { e.preventDefault(); rscale = 1; applyScale(); saveSettings(); return; }
+    if (k === 'g') { e.preventDefault(); openGoto(); return; }
+    if (k === 'c' && !window.getSelection().toString() && !typing()) { e.preventDefault(); copyAll(); return; }
+    if (k === '=' || k === '+') { e.preventDefault(); zoomTo(rscale + RSCALE_STEP_KEY); return; }
+    if (k === '-' || k === '_') { e.preventDefault(); zoomTo(rscale - RSCALE_STEP_KEY); return; }
+    if (k === '0') { e.preventDefault(); zoomTo(1); return; }
     // pestañas
     if (k === 'tab') { e.preventDefault(); cycleTab(e.shiftKey ? -1 : 1); return; }
     if (k === 'pagedown') { e.preventDefault(); cycleTab(1); return; }
@@ -629,17 +954,16 @@ window.addEventListener('keydown', (e) => {
   switch (e.key) {
     case 'w': case 'W': e.preventDefault(); toggleWrap(); break;
     case 'f': case 'F': case 'F11': e.preventDefault(); setFullscreen(!isFs); break;
+    case '/': e.preventDefault(); openFind(); break;
     case 'Escape': if (isFs) { e.preventDefault(); setFullscreen(false); } break;
-    case 'g': e.preventDefault(); view.scrollTo({ top: 0, behavior: 'smooth' }); break;
-    case 'G': e.preventDefault(); view.scrollTo({ top: view.scrollHeight, behavior: 'smooth' }); break;
-    case 'Home': e.preventDefault(); view.scrollTo({ top: 0, behavior: 'smooth' }); break;
-    case 'End': e.preventDefault(); view.scrollTo({ top: view.scrollHeight, behavior: 'smooth' }); break;
-    case ' ': case 'PageDown': e.preventDefault(); view.scrollBy({ top: view.clientHeight * 0.86, behavior: 'smooth' }); break;
-    case 'PageUp': e.preventDefault(); view.scrollBy({ top: -view.clientHeight * 0.86, behavior: 'smooth' }); break;
-    case 'j': view.scrollBy({ top: 90, behavior: 'smooth' }); break;
-    case 'k': view.scrollBy({ top: -90, behavior: 'smooth' }); break;
-    case 'n': e.preventDefault(); gotoMark(1); break;   // siguiente zona marcada (--hl)
-    case 'p': case 'N': e.preventDefault(); gotoMark(-1); break; // zona anterior
+    case 'g': case 'Home': e.preventDefault(); view.scrollTo({ top: 0, behavior: 'smooth' }); break;
+    case 'G': case 'End': e.preventDefault(); view.scrollTo({ top: view.scrollHeight, behavior: 'smooth' }); break;
+    case ' ': case 'PageDown': e.preventDefault(); view.scrollBy({ top: view.clientHeight * SCROLL_PAGE * (e.shiftKey ? -1 : 1), behavior: 'smooth' }); break;
+    case 'PageUp': e.preventDefault(); view.scrollBy({ top: -view.clientHeight * SCROLL_PAGE, behavior: 'smooth' }); break;
+    case 'j': view.scrollBy({ top: SCROLL_LINE, behavior: 'smooth' }); break;
+    case 'k': view.scrollBy({ top: -SCROLL_LINE, behavior: 'smooth' }); break;
+    case 'n': e.preventDefault(); if (find.matches.length) findStep(1); else gotoMark(1); break;   // siguiente coincidencia / zona
+    case 'p': case 'N': e.preventDefault(); if (find.matches.length) findStep(-1); else gotoMark(-1); break;
   }
 });
 $('stMarks').addEventListener('click', () => gotoMark(1));
@@ -653,7 +977,7 @@ window.addEventListener('drop', async (e) => {
   e.preventDefault(); body.classList.remove('dragover');
   const files = e.dataTransfer ? [...e.dataTransfer.files] : [];
   for (const f of files) {
-    try { await renderRawText(await f.text(), f.name); } catch (_) { toast('No se pudo leer'); }
+    try { await renderRawBytes(await f.arrayBuffer(), f.name); } catch (err) { window.__log('drop ' + err); toast('No se pudo leer'); }
   }
 });
 
@@ -666,23 +990,33 @@ function toast(msg, ok) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2000);
 }
 window.addEventListener('contextmenu', (e) => { if (!typing() && !window.getSelection().toString()) e.preventDefault(); });
-// contador de selección vivo en la barra de estado (sólo selecciones dentro del código activo)
+// contador de selección vivo en la barra de estado (sólo selecciones dentro del código activo).
+// Coalescido a un frame: arrastrando para seleccionar llegan decenas de eventos, y toString() de
+// una selección grande recorre todo lo seleccionado.
+let selFrame = 0;
 document.addEventListener('selectionchange', () => {
-  const s = window.getSelection();
-  let n = 0;
-  if (s && s.rangeCount && !s.isCollapsed && adoc().contains(s.anchorNode)) n = s.toString().length;
-  $('stSel').textContent = n > 0 ? 'sel ' + nf.format(n) : '';
+  cancelAnimationFrame(selFrame);
+  selFrame = requestAnimationFrame(() => {
+    const s = window.getSelection();
+    let n = 0;
+    if (s && s.rangeCount && !s.isCollapsed && adoc().contains(s.anchorNode)) n = s.toString().length;
+    $('stSel').textContent = n > 0 ? 'sel ' + nf.format(n) : '';
+  });
 });
+let resizeFrame = 0;
 window.addEventListener('resize', () => {
-  body.classList.toggle('maximized', !isFs && window.innerWidth >= screen.availWidth - 6);
-  updateProgress(); updateStrip();
+  cancelAnimationFrame(resizeFrame);
+  resizeFrame = requestAnimationFrame(() => {
+    body.classList.toggle('maximized', !isFs && window.innerWidth >= screen.availWidth - 6);
+    updateProgress(); updateStrip();
+    applyScale();    // no hace nada salvo que haya cambiado el DPI (ver scaledFor)
+  });
 });
 // Zoom con Ctrl+rueda -> tamaño del código (persistido); preventDefault corta el zoom nativo.
 window.addEventListener('wheel', (e) => {
   if (!e.ctrlKey) return;
   e.preventDefault();
-  rscale = Math.min(2.2, Math.max(0.6, rscale + (e.deltaY < 0 ? 0.07 : -0.07)));
-  applyScale(); saveSettings();
+  zoomTo(rscale + (e.deltaY < 0 ? RSCALE_STEP_WHEEL : -RSCALE_STEP_WHEEL));
 }, { passive: false });
 
 // =========================================================================
@@ -703,9 +1037,9 @@ function boot() {
   else window.addEventListener('load', () => sendReady('load'));
   setTimeout(() => sendReady('timeout'), 400);
   setTimeout(reveal, 4000); // rescate: si el render se cuelga, revelar igual
-  // bus del daemon caliente (único SSE): "open" = qué archivo mostrar, "change" = recarga viva.
-  // En una RECONEXIÓN el server reenvía la última apertura (pendingOpen): si ya está en una
-  // pestaña, ignorarla — es un replay, no un pedido nuevo (no robar el foco de la pestaña actual).
+  // bus del daemon caliente (único SSE): "open" = qué archivo mostrar, "change"/"gone" = recarga
+  // viva, "hl" = bloques recién resaltados. En una RECONEXIÓN el server reenvía la última apertura
+  // (pendingOpen): si ya está en una pestaña, ignorarla — es un replay, no un pedido nuevo.
   try {
     const oe = new EventSource('/bus');
     let oeFirst = true, oeReplay = false;
@@ -713,16 +1047,22 @@ function boot() {
     oe.onmessage = (ev) => {
       const replay = oeReplay; oeReplay = false;
       if (!ev.data) return;
-      const cut = ev.data.indexOf('\t');
-      if (cut < 0) return;
-      const kind = ev.data.slice(0, cut), path = ev.data.slice(cut + 1);
+      const parts = ev.data.split('\t');
+      const kind = parts[0];
+      if (kind === 'hl') {                     // hl \t job \t desde \t hasta
+        const t = tabByJob.get(Number(parts[1]));
+        if (t) pullHighlight(t);
+        return;
+      }
+      const path = parts.slice(1).join('\t');
       if (!path) return;
       if (kind === 'change') { onFileChanged(path); return; }
+      if (kind === 'gone') { onFileGone(path); return; }
       if (kind !== 'open') return;
-      if (replay && tabs.some((t) => t.key === norm(path))) return;
+      if (replay && tabByKey.has(norm(path))) return;
       reveal(); queueOpen(path);
     };
-  } catch (e) {}
+  } catch (e) { window.__log('bus ' + e); }
   fetch('/api/initial').then((r) => r.json()).then((j) => {
     ((j && j.paths) || []).forEach(queueOpen);
     return openChain;

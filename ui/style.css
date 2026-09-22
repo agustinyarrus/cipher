@@ -131,6 +131,7 @@ body.tabs-on #tabs{ display:flex; }
 .tab-dot{ position:absolute; left:5px; top:50%; width:5px; height:5px; margin-top:-2.5px; border-radius:50%;
   background:var(--green); box-shadow:0 0 6px -1px var(--green); opacity:0; transition:opacity .25s; }
 .tab.stale .tab-dot{ opacity:.9; }              /* cambió en disco en segundo plano */
+.tab.gone .tab-name{ text-decoration:line-through; text-decoration-color:rgba(229,72,77,.6); opacity:.62; }
 .tab-dot.pulse{ animation:tabdotpulse .9s var(--ease); }
 @keyframes tabdotpulse{ 0%{ opacity:.9; transform:scale(1); } 40%{ opacity:1; transform:scale(2); } 100%{ opacity:0; transform:scale(1); } }
 
@@ -193,6 +194,30 @@ body.find-open #findbar{ display:flex; transform:translateY(0); opacity:1; }
 .find-nav svg{ stroke:currentColor; stroke-width:1.5; fill:none; stroke-linecap:round; stroke-linejoin:round; }
 .find-nav:hover{ background:rgba(255,255,255,.07); color:var(--fg-strong); }
 
+/* opciones de busqueda: Aa (mayusculas), ab (palabra entera), .* (expresion regular) */
+.find-opts{ display:flex; gap:2px; margin-left:1px; }
+.find-opt{ min-width:24px; height:22px; padding:0 5px; border-radius:6px; border:1px solid transparent;
+  background:transparent; color:var(--fg-faint); cursor:default;
+  font-family:inherit; font-size:var(--px-11); font-weight:200; letter-spacing:.2px;
+  transition:color .14s, background .14s, border-color .14s; }
+.find-opt:hover{ color:var(--fg); background:rgba(255,255,255,.05); }
+.find-opt.on{ color:var(--fg-strong); background:rgba(255,255,255,.08); border-color:rgba(255,255,255,.18); }
+.find-opt-word{ text-decoration:underline; text-underline-offset:3px; text-decoration-thickness:1px; }
+#findbar.bad #findInput{ color:var(--red); }          /* expresion regular invalida */
+
+/* ir a linea (Ctrl G): la misma pieza de cristal que la busqueda, a la izquierda */
+#gotobar{ position:fixed; top:calc(var(--tb-h) + 12px); left:50%; z-index:70;
+  display:none; align-items:center; gap:8px; padding:6px 10px 6px 12px;
+  background:rgba(10,10,10,.92); border:1px solid var(--line); border-radius:10px;
+  backdrop-filter:blur(18px) saturate(150%); -webkit-backdrop-filter:blur(18px) saturate(150%);
+  box-shadow:0 14px 40px -16px rgba(0,0,0,.8); transform:translate(-50%,-8px); opacity:0;
+  transition:opacity .18s var(--ease), transform .18s var(--ease); }
+body.goto-open #gotobar{ display:flex; transform:translate(-50%,0); opacity:1; }
+.goto-ico{ color:var(--fg-faint); font-size:var(--px-12_5); }
+#gotoInput{ width:150px; background:transparent; border:0; outline:0; color:var(--fg);
+  font-family:inherit; font-size:var(--px-12_5); font-weight:200; -webkit-user-select:text; user-select:text; }
+#gotoInput::placeholder{ color:var(--fg-faint); }
+
 ::highlight(cipher-find){ background-color:rgba(255,255,255,.25); color:#fff; }
 ::highlight(cipher-find-current){ background-color:var(--accent); color:#000000; }
 
@@ -224,6 +249,15 @@ body.wrap #code > .doc{ width:auto; }
   -webkit-user-select:text; user-select:text; }
 /* el <code> del navegador trae font-family:monospace (UA) y pisaria la Cascadia de .chroma -> inherit */
 #code .chroma code{ display:block; font-family:inherit; }
+
+/* Bloques de chunkLines renglones: el navegador no hace el layout ni pinta los que están fuera
+   de la vista (content-visibility), así un archivo de cien mil renglones abre como uno de cien.
+   Mientras un bloque no se mide, ocupa lo que declara: el alto de sus renglones (--n, 256 salvo
+   el último) y el ancho de su renglón más ancho en columnas (--w, lo calcula el server) más el
+   armazón del gutter; así ni el scroll vertical ni la barra horizontal saltan al aparecer. */
+#code .cx{ display:block; content-visibility:auto;
+  contain-intrinsic-size:auto calc((var(--w, 80) + var(--dg, 4)) * 1ch + 72px)
+                         auto calc(var(--lh-code) * var(--n, 256)); }
 
 /* cada línea = fila flex: gutter de número (sticky) + código */
 .chroma .line{ display:flex; align-items:flex-start; min-width:100%; }
@@ -260,6 +294,9 @@ body.wrap .chroma .cl{ flex:1 1 auto; min-width:0;
 /* destello al navegar entre zonas (n/p o click en la pill) */
 .chroma .line.hl-flash{ animation:hlflash 1s var(--ease); }
 @keyframes hlflash{ 0%{ background:rgba(var(--mk),.30); } 100%{ background:rgba(var(--mk),.05); } }
+/* destello del renglon al que se salto con Ctrl G (blanco: el unico acento del cromo) */
+.chroma .line.goto-flash{ animation:gotoflash 1.1s var(--ease); }
+@keyframes gotoflash{ 0%{ background:rgba(255,255,255,.16); } 100%{ background:transparent; } }
 
 /* fallback plano (sin lexer) y mensajes (decompilación fallida) */
 #code pre.cipher-plain,#code pre.cipher-msg{ margin:0; padding:14px 20px;
@@ -297,6 +334,8 @@ body.wrap .chroma .cl{ flex:1 1 auto; min-width:0;
 #stMarks .mk-2{ color:#f38ba8; }  /* borrado    */
 #stDecomp.on{ display:inline; color:var(--fg); background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.22); }
 #stTrunc.on{ display:inline; color:var(--warn); background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.22); }
+#stHl.on,#stPlain.on{ display:inline; color:var(--fg-dim); background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.12); }
+#stGone.on{ display:inline; color:#F1A6A9; background:rgba(229,72,77,.10); border:1px solid rgba(229,72,77,.30); }
 body.no-doc #statusbar .st-right,body.no-doc #stPath{ opacity:0; }
 
 /* ============================ estado vacio ============================ */
