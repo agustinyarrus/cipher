@@ -19,9 +19,9 @@ if ((Test-Path cipher.ico) -and -not (Test-Path rsrc.syso)) {
 }
 
 if ($Debug) {
-  go build -o cipher-debug.exe .
+  go build -trimpath -o cipher-debug.exe .
   Write-Host "OK -> $(Resolve-Path cipher-debug.exe)   (CIPHER_DEBUG=1 para logs; --dump <archivo> vuelca el render)"
 } else {
-  go build -ldflags="-H windowsgui -s -w" -o cipher.exe .
+  go build -trimpath -ldflags="-H windowsgui -s -w" -o cipher.exe .
   Write-Host "OK -> $(Resolve-Path cipher.exe)"
 }
