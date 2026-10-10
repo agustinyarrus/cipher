@@ -98,6 +98,10 @@ body.live-on .tb-center .live{ opacity:.8; }
   transition:color .14s ease, background .14s ease; }
 .tbtn svg{ stroke:currentColor; stroke-width:1.4; fill:none; stroke-linecap:round; stroke-linejoin:round; }
 .tbtn:hover{ color:var(--fg-strong); background:rgba(255,255,255,.05); }
+.tbtn-lang span{ font-size:var(--px-10); font-weight:200; letter-spacing:1.6px; text-transform:uppercase;
+  line-height:1; padding-left:1.6px; /* compensa el espaciado de la última letra */ }
+/* los botones del cromo no se recorren con Tab: un clic no les deja el anillo de foco */
+.tbtn:focus, .winbtn:focus, .find-nav:focus, .find-opt:focus, .open-btn:focus{ outline:none; }
 .tbtn.on{ color:var(--accent); }
 .tb-sep{ width:1px; height:16px; background:var(--line); margin:0 6px; }
 

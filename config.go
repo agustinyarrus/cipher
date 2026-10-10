@@ -8,6 +8,7 @@ package main
 //   - rscale : tamaño de letra del código (Ctrl +/-)
 //   - wrap   : ajuste de línea (word-wrap) on/off
 //   - window : geometría de la ventana (se guarda al cerrar, en WM_CLOSE)
+//   - lang   : idioma elegido con el botón de la barra ("es" / "en"); vacío = el de Windows
 
 import (
 	"encoding/json"
@@ -32,6 +33,7 @@ type appConfig struct {
 	RScale float64  `json:"rscale"`
 	Wrap   *bool    `json:"wrap"`
 	Window *winGeom `json:"window"`
+	Lang   string   `json:"lang,omitempty"` // "es", "en" o vacío (automático)
 }
 
 var (
@@ -107,4 +109,23 @@ func uiPrefs() (rscale float64, wrap bool) {
 		wrap = *gCfg.Wrap
 	}
 	return
+}
+
+// langSetting es el idioma guardado ("" = automático, que decide Windows).
+func langSetting() string {
+	gCfgMu.Lock()
+	defer gCfgMu.Unlock()
+	return gCfg.Lang
+}
+
+// setLangSetting guarda la elección del usuario. Sólo "es" o "en": cualquier otra cosa vuelve a
+// automático, así un config.json editado a mano nunca deja la app en un idioma inexistente.
+func setLangSetting(code string) {
+	if code != "es" && code != "en" {
+		code = ""
+	}
+	gCfgMu.Lock()
+	defer gCfgMu.Unlock()
+	gCfg.Lang = code
+	saveConfigLocked()
 }

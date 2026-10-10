@@ -12,6 +12,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"cipher/i18n"
 )
 
 const ptrSize = unsafe.Sizeof(uintptr(0))
@@ -137,11 +139,11 @@ func pickCode(owner uintptr) []string {
 	comCall(dlg, mSetOptions, uintptr(opts|fosForceFS|fosAllowMulti))
 
 	specs := []comdlgFilterSpec{
-		{utf16Ptr("Todos los archivos"), utf16Ptr("*.*")},
-		{utf16Ptr("Código"), utf16Ptr(CodeGlob())},
+		{utf16Ptr(i18n.T("Todos los archivos")), utf16Ptr("*.*")},
+		{utf16Ptr(i18n.T("Código")), utf16Ptr(CodeGlob())},
 	}
 	comCall(dlg, mSetFileTypes, uintptr(len(specs)), uintptr(unsafe.Pointer(&specs[0])))
-	comCall(dlg, mSetTitle, utf16Ptr("Abrir archivos"))
+	comCall(dlg, mSetTitle, utf16Ptr(i18n.T("Abrir archivos")))
 
 	if comCall(dlg, mShow, owner) < 0 {
 		return nil // cancelado por el usuario

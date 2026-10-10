@@ -34,6 +34,8 @@ import (
 
 	"github.com/jchv/go-webview2"
 	"golang.org/x/sys/windows"
+
+	"cipher/i18n"
 )
 
 var debugLog = os.Getenv("CIPHER_DEBUG") != ""
@@ -679,6 +681,8 @@ func main() {
 	scale := float64(getDpiForSystem()) / 96.0
 	uiScale = scale
 	loadConfig()
+	// idioma: el elegido en la barra, CIPHER_LANG o el de Windows (ver i18n): antes de cualquier texto
+	i18n.Resolve(i18n.Choice{Setting: langSetting(), AppEnv: "CIPHER_LANG"})
 
 	// modo headless para depurar el render (cipher-debug.exe --dump <archivo>): imprime metadatos
 	// + el principio del HTML y sale. Sólo útil en el build con consola.
@@ -802,7 +806,7 @@ func main() {
 		pUnhookWindowsHookEx.Call(cbtHook)
 	}
 	if w == nil {
-		panic("no se pudo crear WebView2")
+		panic(i18n.T("no se pudo crear WebView2"))
 	}
 	defer w.Destroy()
 
@@ -912,6 +916,9 @@ func main() {
 	if debugLog {
 		initJS += "window.__CIPHER_DEBUG__=true;"
 	}
+	// un solo catálogo por app: el mismo en.json que usa el Go viaja a la página (ui/i18n.js)
+	initJS += "window.__I18N_EN__=" + string(i18n.CatalogJSON()) + ";"
+	initJS += "window.__I18N_LANG__=\"" + i18n.Current().String() + "\";"
 	// worker del raise: bringToFront FUERA del hilo de UI (ver el comentario de bringToFront) y
 	// coalescido, para que una ráfaga de handoffs no lo spamee ni pueda deadlockear la ventana.
 	go func() {
@@ -953,6 +960,29 @@ func startServer(initialPaths []string) string {
 
 	// preferencias persistentes (tamaño de letra, word-wrap). Ver config.go. El tamaño de letra
 	// se inyecta además en el initJS para no parpadear al abrir.
+	// idioma: el botón de la barra (o la tecla L) lo cambia; queda guardado en config.json. Desde ahí
+	// el Go también arma en el idioma nuevo lo que manda: errores de decompilación, la codificación
+	// ("sin BOM"), el motivo de no resaltar, el diálogo de abrir. La página vuelve a pedir lo abierto.
+	mux.HandleFunc("/api/lang", func(wr http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			var body struct {
+				Lang string `json:"lang"`
+			}
+			if json.NewDecoder(http.MaxBytesReader(wr, r.Body, 1<<10)).Decode(&body) != nil {
+				wr.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			l, ok := i18n.Parse(body.Lang)
+			if !ok {
+				wr.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			setLangSetting(l.String())
+			i18n.Set(l)
+		}
+		writeJSON(wr, map[string]string{"lang": i18n.Current().String()})
+	})
+
 	mux.HandleFunc("/api/settings", func(wr http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			var body struct {
@@ -992,7 +1022,7 @@ func startServer(initialPaths []string) string {
 	mux.HandleFunc("/render", func(wr http.ResponseWriter, r *http.Request) {
 		p := r.URL.Query().Get("path")
 		if p == "" {
-			writeJSON(wr, map[string]any{"ok": false, "error": "sin ruta"})
+			writeJSON(wr, map[string]any{"ok": false, "error": i18n.T("sin ruta")})
 			return
 		}
 		if abs, err := filepath.Abs(p); err == nil {
@@ -1001,7 +1031,7 @@ func startServer(initialPaths []string) string {
 		fi, err := os.Stat(p)
 		if err != nil || fi.IsDir() {
 			wr.WriteHeader(http.StatusNotFound)
-			writeJSON(wr, map[string]any{"ok": false, "error": "no se pudo abrir"})
+			writeJSON(wr, map[string]any{"ok": false, "error": i18n.T("no se pudo abrir")})
 			return
 		}
 		name := filepath.Base(p)
@@ -1247,7 +1277,7 @@ func onlyLocalHost(addr string, next http.Handler) http.Handler {
 	}
 	return http.HandlerFunc(func(wr http.ResponseWriter, r *http.Request) {
 		if !allowed[strings.ToLower(r.Host)] {
-			http.Error(wr, "host no permitido", http.StatusForbidden)
+			http.Error(wr, i18n.T("host no permitido"), http.StatusForbidden)
 			return
 		}
 		next.ServeHTTP(wr, r)

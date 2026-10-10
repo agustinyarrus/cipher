@@ -29,6 +29,8 @@ import (
 	"github.com/alecthomas/chroma/v2"
 	chromahtml "github.com/alecthomas/chroma/v2/formatters/html"
 	"github.com/alecthomas/chroma/v2/lexers"
+
+	"cipher/i18n"
 )
 
 const (
@@ -152,9 +154,9 @@ func decodeText(src []byte) ([]byte, string) {
 	}
 	if le, ok := utf16Sniff(src); ok {
 		if le {
-			return utf16ToUTF8(src, false), "UTF-16 LE sin BOM"
+			return utf16ToUTF8(src, false), i18n.T("UTF-16 LE sin BOM")
 		}
-		return utf16ToUTF8(src, true), "UTF-16 BE sin BOM"
+		return utf16ToUTF8(src, true), i18n.T("UTF-16 BE sin BOM")
 	}
 	return src, ""
 }
@@ -572,7 +574,7 @@ func highlight(code, langHint, jobKey string) RenderResult {
 	b.WriteString(`<pre class="chroma"><code>`)
 	plain := li.longest > longLine || lexer == lexers.Fallback
 	if li.longest > longLine {
-		res.Plain = "minificado"
+		res.Plain = i18n.T("minificado")
 	}
 	var w *lineWriter
 	if !plain {

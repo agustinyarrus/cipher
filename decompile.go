@@ -23,6 +23,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"cipher/i18n"
 )
 
 const (
@@ -124,7 +126,7 @@ func decompileClass(path string) (string, string, error) {
 	if out, derr := runTool(javapExe(java), "-p", "-c", path); derr == nil && strings.TrimSpace(out) != "" {
 		return out, "javap", nil
 	}
-	return "", "", errors.New("no se pudo decompilar el .class (CFR y javap fallaron)")
+	return "", "", errors.New(i18n.T("no se pudo decompilar el .class (CFR y javap fallaron)"))
 }
 
 // ---- localización de la toolchain Java ---------------------------------
@@ -138,9 +140,9 @@ func javaExe() (string, error) {
 	if p, err := exec.LookPath("java"); err == nil {
 		return p, nil
 	}
-	return "", errors.New("Para decompilar .class hace falta Java.\n" +
+	return "", errors.New(i18n.T("Para decompilar .class hace falta Java.\n" +
 		"No se encontró 'java' en el PATH ni en JAVA_HOME.\n\n" +
-		"Instalá un JDK/JRE (por ejemplo Temurin / OpenJDK) y reabrí el archivo.")
+		"Instalá un JDK/JRE (por ejemplo Temurin / OpenJDK) y reabrí el archivo."))
 }
 
 func javapExe(java string) string {
@@ -197,7 +199,7 @@ func runTool(name string, args ...string) (string, error) {
 	cmd.Stderr = &errb
 	err := cmd.Run()
 	if ctx.Err() == context.DeadlineExceeded {
-		return out.String(), fmt.Errorf("%s no respondió en %v", filepath.Base(name), decompileTimeout)
+		return out.String(), errors.New(i18n.F("%s no respondió en %v", filepath.Base(name), decompileTimeout))
 	}
 	if err != nil {
 		if msg := strings.TrimSpace(errb.String()); msg != "" {

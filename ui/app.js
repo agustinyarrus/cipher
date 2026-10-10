@@ -50,7 +50,8 @@ function newTab(path) {
   };
   t.el.className = 'tab'; t.el.setAttribute('role', 'tab');
   t.el.innerHTML = '<span class="tab-dot" aria-hidden="true"></span><span class="tab-name"></span>' +
-    '<span class="tab-x" title="Cerrar (Ctrl W)">' + TAB_X + '</span>';
+    '<span class="tab-x">' + TAB_X + '</span>';
+  t.el.querySelector('.tab-x').title = I18N.t('Cerrar (Ctrl W)');
   t.el.addEventListener('click', (e) => { if (e.target.closest('.tab-x')) closeTab(t); else activateTab(t); });
   t.el.addEventListener('auxclick', (e) => { if (e.button === 1) { e.preventDefault(); closeTab(t); } });
   t.el.addEventListener('pointerdown', (e) => { if (e.button === 1) e.preventDefault(); }); // sin autoscroll
@@ -144,7 +145,7 @@ function syncChrome(t) {
   $('capLang').textContent = (t.j && !t.j.binary && t.j.lang) || '';
   if (t.j) {
     fillStatus(t.j, t);
-    if (t.j.binary) showNotice('Archivo binario', 'No se puede mostrar como texto'); else clearNotice();
+    if (t.j.binary) showNotice(I18N.t('Archivo binario'), I18N.t('No se puede mostrar como texto')); else clearNotice();
   }
   syncMarksPill();
 }
@@ -166,7 +167,7 @@ async function openInTab(path) {
   try {
     const r = await fetch('/render?path=' + encodeURIComponent(path));
     const j = await r.json();
-    if (!j.ok) { toast(j.error || 'No se pudo abrir'); return; }
+    if (!j.ok) { toast(j.error || I18N.t('No se pudo abrir')); return; }
     const existing = tabByKey.get(norm(j.path));
     const t = existing || newTab(j.path);
     // reabrir la misma pestaña con la MISMA spec de marcas -> refresco silencioso (conserva el
@@ -178,7 +179,7 @@ async function openInTab(path) {
     paint(t, j, { silent });
     if (anchor) restoreLineAnchor(anchor);
     setStale(t, false); setGone(t, false);
-  } catch (e) { window.__log('open ' + e); toast('Error al abrir'); }
+  } catch (e) { window.__log('open ' + e); toast(I18N.t('Error al abrir')); }
 }
 
 // Arrastrar-y-soltar: se mandan los BYTES (sin ruta en disco -> sin recarga viva ni dedup). Leerlo
@@ -189,11 +190,12 @@ async function renderRawBytes(bytes, name) {
       method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: bytes,
     });
     const j = await r.json();
-    if (!j.ok) { toast('No se pudo abrir'); return; }
+    if (!j.ok) { toast(I18N.t('No se pudo abrir')); return; }
     const t = newTab(null);
+    t.raw = { bytes, name };   // para volver a pedirlo si cambia el idioma (no tiene ruta)
     activateTab(t, { noRefresh: true });
     paint(t, j, {});
-  } catch (e) { window.__log('drop ' + e); toast('Error al abrir'); }
+  } catch (e) { window.__log('drop ' + e); toast(I18N.t('Error al abrir')); }
 }
 
 // paint inyecta el HTML resaltado en el doc de la pestaña y, si es la activa, refresca el cromo.
@@ -311,7 +313,7 @@ function afterChunksChanged(t) {
 function syncHlPill(t) {
   const pill = $('stHl');
   if (t && t.hl && t.hl.total) {
-    pill.textContent = 'resaltando ' + Math.floor(100 * t.hl.next / t.hl.total) + '%';
+    pill.textContent = I18N.t('resaltando {pct}%', { pct: Math.floor(100 * t.hl.next / t.hl.total) });
     pill.classList.add('on');
   } else { pill.textContent = ''; pill.classList.remove('on'); }
 }
@@ -358,10 +360,11 @@ function updateMarksPill() {
   let html;
   if (n === 1) {
     const rg = marks.regions[0];
-    const label = rg.from === rg.to ? 'línea ' + rg.from : 'líneas ' + rg.from + '–' + rg.to;
+    const label = rg.from === rg.to ? I18N.t('línea {n}', { n: rg.from })
+      : I18N.t('líneas {desde}–{hasta}', { desde: rg.from, hasta: rg.to });
     html = '§ <span class="mk-' + rg.kind + '">' + (rg.kind ? MK_SYM[rg.kind] + ' ' : '') + label + '</span>';
   } else {
-    html = '§ ' + (marks.idx >= 0 ? (marks.idx + 1) + '/' : '') + n + ' zonas';
+    html = '§ ' + I18N.t('{cuenta} zonas', { cuenta: (marks.idx >= 0 ? (marks.idx + 1) + '/' : '') + n });
     if (c[1]) html += ' <span class="mk-1">+' + c[1] + '</span>';
     if (c[2]) html += ' <span class="mk-2">−' + c[2] + '</span>';
     if (c[0]) html += ' <span class="mk-0">~' + c[0] + '</span>';
@@ -385,20 +388,21 @@ function gotoMark(dir) {
 }
 
 // ---- barra de estado ----------------------------------------------------
-const nf = new Intl.NumberFormat('es-AR');
+// números con el separador del idioma (12.345 / 12,345): I18N.num
 function humanSize(n) {
   if (n == null) return '';
   if (n < 1024) return n + ' B';
-  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
-  return (n / 1024 / 1024).toFixed(2) + ' MB';
+  if (n < 1024 * 1024) return I18N.num(n / 1024, 1) + ' KB';
+  return I18N.num(n / 1024 / 1024, 2) + ' MB';
 }
 // fecha de modificación compacta: "hoy 13:24", "22/07 13:24" o "22/07/25 13:24" si es de otro año
+// (en inglés: "today 13:24" y el mes primero, "07/22 13:24")
 function fmtWhen(ms) {
   if (!ms) return '';
   const d = new Date(ms), now = new Date(), p = (x) => String(x).padStart(2, '0');
   const hm = p(d.getHours()) + ':' + p(d.getMinutes());
-  if (d.toDateString() === now.toDateString()) return 'hoy ' + hm;
-  const dm = p(d.getDate()) + '/' + p(d.getMonth() + 1);
+  if (d.toDateString() === now.toDateString()) return I18N.t('hoy {hora}', { hora: hm });
+  const dm = I18N.lang === 'en' ? p(d.getMonth() + 1) + '/' + p(d.getDate()) : p(d.getDate()) + '/' + p(d.getMonth() + 1);
   return (d.getFullYear() === now.getFullYear() ? dm : dm + '/' + String(d.getFullYear()).slice(-2)) + ' ' + hm;
 }
 function pill(id, text) {
@@ -406,20 +410,20 @@ function pill(id, text) {
 }
 function fillStatus(j, t) {
   $('stPath').textContent = j.path || j.name || '';
-  pill('stDecomp', j.decompiled ? 'decompilado · ' + (j.tool || '') : '');
-  pill('stTrunc', j.truncated ? 'recortado' : '');
-  pill('stPlain', j.plain ? 'sin resaltado · ' + j.plain : '');
-  pill('stGone', t && t.gone ? 'borrado del disco' : '');
-  $('stLang').textContent = j.binary ? 'binario' : (j.lang || '');
-  $('stLines').textContent = j.binary ? '' : (nf.format(j.lines || 0) + (j.lines === 1 ? ' línea' : ' líneas'));
-  $('stChars').textContent = (j.binary || j.chars == null) ? '' : nf.format(j.chars) + ' carac.';
+  pill('stDecomp', j.decompiled ? I18N.t('decompilado · {herramienta}', { herramienta: j.tool || '' }) : '');
+  pill('stTrunc', j.truncated ? I18N.t('recortado') : '');
+  pill('stPlain', j.plain ? I18N.t('sin resaltado · {motivo}', { motivo: j.plain }) : '');
+  pill('stGone', t && t.gone ? I18N.t('borrado del disco') : '');
+  $('stLang').textContent = j.binary ? I18N.t('binario') : (j.lang || '');
+  $('stLines').textContent = j.binary ? '' : I18N.tn(j.lines || 0, '{n} línea', '{n} líneas', { n: I18N.num(j.lines || 0) });
+  $('stChars').textContent = (j.binary || j.chars == null) ? '' : I18N.t('{n} carac.', { n: I18N.num(j.chars) });
   $('stSize').textContent = humanSize(j.binary ? j.bytes : (j.size != null ? j.size : j.bytes));
   // codificación + fin de línea. La codificación sólo se muestra si NO es UTF-8 a secas (un .reg
   // de regedit viene en UTF-16 LE) y el fin de línea sólo si hay más de un renglón; "Mixto"
   // delata el archivo con finales mezclados (un clásico de los merges).
   const eol = j.eol !== undefined ? j.eol : (j.crlf ? 'CRLF' : 'LF');
   $('stEol').textContent = j.binary ? '' : [j.encoding, eol].filter(Boolean).join(' · ');
-  $('stMod').textContent = j.mtime ? 'mod ' + fmtWhen(j.mtime) : '';
+  $('stMod').textContent = j.mtime ? I18N.t('mod {cuando}', { cuando: fmtWhen(j.mtime) }) : '';
   $('stSel').textContent = '';
   syncHlPill(t);
 }
@@ -458,7 +462,7 @@ async function copyAll() {
     ta.select(); try { document.execCommand('copy'); } catch (err) { window.__log('execCommand ' + err); }
     ta.remove();
   }
-  toast('Copiado', true);
+  toast(I18N.t('Copiado'), true);
 }
 
 // =========================================================================
@@ -477,7 +481,7 @@ function syncWatch() {
 function setStale(t, on) { t.stale = on; t.el.classList.toggle('stale', on); }
 function setGone(t, on) {
   t.gone = on; t.el.classList.toggle('gone', on);
-  if (t === activeTab) { pill('stGone', on ? 'borrado del disco' : ''); body.classList.toggle('live-on', !!t.path && !on); }
+  if (t === activeTab) { pill('stGone', on ? I18N.t('borrado del disco') : ''); body.classList.toggle('live-on', !!t.path && !on); }
 }
 function onFileChanged(path) {
   const t = tabByKey.get(norm(path));
@@ -521,7 +525,8 @@ async function liveReload(t) {
     if (!j.ok) return;
     setStale(t, false);
     if (t.j && j.html === t.j.html) {            // mismo contenido (se toco la fecha): no repintar
-      t.j.mtime = j.mtime;
+      // la fecha y lo que el server arma en el idioma de la UI (codificación, motivo de no resaltar)
+      Object.assign(t.j, { mtime: j.mtime, encoding: j.encoding, plain: j.plain, tool: j.tool });
       if (t === activeTab) fillStatus(t.j, t);
       // el render nuevo cancelo el trabajo de resaltado anterior: adoptar el nuevo (re-entrega
       // bloques identicos a los ya pintados, que se reemplazan sin que nada se mueva)
@@ -764,7 +769,7 @@ function openGoto() {
   body.classList.add('goto-open');
   const inp = $('gotoInput');
   const total = activeTab.j.lines || 0;
-  $('gotoHint').textContent = '1–' + nf.format(total);
+  $('gotoHint').textContent = '1–' + I18N.num(total);
   inp.value = ''; inp.focus();
 }
 function closeGoto() { body.classList.remove('goto-open'); $('gotoInput').blur(); }
@@ -772,7 +777,7 @@ function gotoLine(raw) {
   const t = activeTab;
   if (!t) return;
   const m = /^\s*(-?\d+)\s*(?::\s*\d+)?\s*$/.exec(raw);
-  if (!m) { toast('Número de línea inválido'); return; }
+  if (!m) { toast(I18N.t('Número de línea inválido')); return; }
   const total = t.j.lines || 0;
   let n = parseInt(m[1], 10);
   if (n < 0) n = total + 1 + n;
@@ -903,6 +908,7 @@ $('btnWrap').addEventListener('click', toggleWrap);
 $('btnCopy').addEventListener('click', copyAll);
 $('btnFind').addEventListener('click', openFind);
 $('btnOpen').addEventListener('click', () => bridge('cipherPick'));
+$('btnLang').addEventListener('click', () => toggleLang());
 $('emptyOpen').addEventListener('click', () => bridge('cipherPick'));
 
 const DBLCLICK_MS = 300;
@@ -953,6 +959,7 @@ window.addEventListener('keydown', (e) => {
 
   switch (e.key) {
     case 'w': case 'W': e.preventDefault(); toggleWrap(); break;
+    case 'l': case 'L': e.preventDefault(); toggleLang(); break;
     case 'f': case 'F': case 'F11': e.preventDefault(); setFullscreen(!isFs); break;
     case '/': e.preventDefault(); openFind(); break;
     case 'Escape': if (isFs) { e.preventDefault(); setFullscreen(false); } break;
@@ -977,9 +984,62 @@ window.addEventListener('drop', async (e) => {
   e.preventDefault(); body.classList.remove('dragover');
   const files = e.dataTransfer ? [...e.dataTransfer.files] : [];
   for (const f of files) {
-    try { await renderRawBytes(await f.arrayBuffer(), f.name); } catch (err) { window.__log('drop ' + err); toast('No se pudo leer'); }
+    try { await renderRawBytes(await f.arrayBuffer(), f.name); } catch (err) { window.__log('drop ' + err); toast(I18N.t('No se pudo leer')); }
   }
 });
+
+// =========================================================================
+// Idioma (castellano / inglés)
+//
+// El botón de la barra muestra el idioma ACTUAL; tocarlo (o la tecla L) pasa al otro. El host lo
+// guarda en config.json y desde ahí también el Go arma en el idioma nuevo lo que manda (errores de
+// decompilación, "sin BOM", el motivo de no resaltar). Por eso, además de re-traducir la página, se
+// vuelve a pedir cada pestaña: la activa ya, las de fondo al activarlas (quedan "stale").
+// =========================================================================
+const LANG_NAMES = { es: 'Español', en: 'English' };
+function paintLangButton() {
+  const cur = I18N.lang, next = cur === 'es' ? 'en' : 'es';
+  $('langCode').textContent = cur;
+  $('btnLang').title = I18N.t('Idioma: {actual} · pasar a {otro} (L)', { actual: LANG_NAMES[cur], otro: LANG_NAMES[next] });
+}
+let langBusy = false;   // un doble clic no manda dos cambios cruzados
+async function toggleLang() {
+  if (langBusy) return;
+  langBusy = true;
+  const next = I18N.lang === 'es' ? 'en' : 'es';
+  try {
+    const r = await fetch('/api/lang', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lang: next }),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    I18N.set((await r.json()).lang);
+  } catch (e) { window.__log('lang ' + e); toast(I18N.t('No se pudo cambiar el idioma')); }
+  finally { langBusy = false; }
+}
+// una pestaña soltada (sin ruta) se vuelve a pedir con sus bytes; repinta sólo si cambió algo
+async function rerenderRaw(tab) {
+  try {
+    const r = await fetch('/render-text?name=' + encodeURIComponent(tab.raw.name || 'snippet.txt'), {
+      method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: tab.raw.bytes,
+    });
+    const j = await r.json();
+    if (!j.ok) return;
+    if (tab.j && j.html === tab.j.html) Object.assign(tab.j, { encoding: j.encoding, plain: j.plain, tool: j.tool });
+    else paint(tab, j, { silent: true });
+    if (tab === activeTab) syncChrome(tab);
+  } catch (e) { window.__log('lang raw ' + e); }
+}
+window.addEventListener('i18n', () => {
+  paintLangButton();
+  for (const x of tabsNav.querySelectorAll('.tab-x')) x.title = I18N.t('Cerrar (Ctrl W)');
+  updateFindCount();
+  for (const tab of tabs) {
+    if (tab.path) { if (tab === activeTab) liveReload(tab); else setStale(tab, true); }
+    else if (tab.raw) rerenderRaw(tab);
+  }
+  if (activeTab) syncChrome(activeTab);   // pills, aviso de binario y marcas, ya traducidos
+});
+paintLangButton();
 
 // =========================================================================
 // Varios
@@ -1000,7 +1060,7 @@ document.addEventListener('selectionchange', () => {
     const s = window.getSelection();
     let n = 0;
     if (s && s.rangeCount && !s.isCollapsed && adoc().contains(s.anchorNode)) n = s.toString().length;
-    $('stSel').textContent = n > 0 ? 'sel ' + nf.format(n) : '';
+    $('stSel').textContent = n > 0 ? 'sel ' + I18N.num(n) : '';
   });
 });
 let resizeFrame = 0;
