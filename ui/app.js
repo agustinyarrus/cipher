@@ -996,7 +996,7 @@ window.addEventListener('drop', async (e) => {
 // decompilación, "sin BOM", el motivo de no resaltar). Por eso, además de re-traducir la página, se
 // vuelve a pedir cada pestaña: la activa ya, las de fondo al activarlas (quedan "stale").
 // =========================================================================
-const LANG_NAMES = { es: 'Español', en: 'English' };
+const LANG_NAMES = { en: 'English', es: 'Español' };
 function paintLangButton() {
   const cur = I18N.lang, next = cur === 'es' ? 'en' : 'es';
   $('langCode').textContent = cur;
