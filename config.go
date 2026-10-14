@@ -8,7 +8,7 @@ package main
 //   - rscale : tamaño de letra del código (Ctrl +/-)
 //   - wrap   : ajuste de línea (word-wrap) on/off
 //   - window : geometría de la ventana (se guarda al cerrar, en WM_CLOSE)
-//   - lang   : idioma elegido con el botón de la barra ("es" / "en"); vacío = inglés por defecto
+//   - lang   : idioma elegido con el botón de la barra ("es" / "en"); vacío = el de Windows
 
 import (
 	"encoding/json"
@@ -111,7 +111,7 @@ func uiPrefs() (rscale float64, wrap bool) {
 	return
 }
 
-// langSetting es el idioma guardado ("" = automático: inglés si nada más elige).
+// langSetting es el idioma guardado ("" = automático, que decide Windows).
 func langSetting() string {
 	gCfgMu.Lock()
 	defer gCfgMu.Unlock()

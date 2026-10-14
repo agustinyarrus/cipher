@@ -681,7 +681,7 @@ func main() {
 	scale := float64(getDpiForSystem()) / 96.0
 	uiScale = scale
 	loadConfig()
-	// idioma: el elegido en la barra, CIPHER_LANG o inglés por defecto (ver i18n): antes de cualquier texto
+	// idioma: el elegido en la barra, CIPHER_LANG o el de Windows (ver i18n): antes de cualquier texto
 	i18n.Resolve(i18n.Choice{Setting: langSetting(), AppEnv: "CIPHER_LANG"})
 
 	// modo headless para depurar el render (cipher-debug.exe --dump <archivo>): imprime metadatos
